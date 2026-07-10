@@ -240,9 +240,6 @@ function SettingsPage() {
             onChange={(e) => setApiKey(e.target.value)}
           />
           <div className="settings-actions">
-            <button className="pill pill-button" onClick={saveKey} disabled={!apiKey.trim()}>
-              {t(lang, "save")}
-            </button>
             <button
               className="pill pill-button pill-button-secondary"
               onClick={clearKey}
@@ -255,7 +252,7 @@ function SettingsPage() {
       </main>
 
       <footer className="settings-footer">
-        <button className="cta-button" onClick={saveKey}>
+        <button className="cta-button" onClick={saveKey} disabled={!apiKey.trim()}>
           {t(lang, "saveConfig")}
         </button>
         <p className="footer-caption">🔒 {t(lang, "savedLocally")}</p>

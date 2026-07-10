@@ -22,8 +22,14 @@ pub fn system_prompt(source_lang: &str, target_lang: &str) -> String {
          phrasing, correct idioms, and a professional-but-conversational register. The input \
          may be a short fragment or informal phrase rather than a full sentence; translate \
          accordingly without forcing unnatural formality. Preserve code snippets, proper \
-         nouns, URLs, and technical terms unchanged. Output ONLY the translated text — no \
-         quotes, no explanation, no preamble."
+         nouns, URLs, and technical terms unchanged. This includes file names and paths \
+         (e.g. \"Archivo.tsx\", \"componente/Boton.tsx\", \"config.json\") — never translate \
+         the file name itself or its extension, even if a word inside it looks like an \
+         ordinary {source_lang} word, and never change its capitalization either \
+         (\"Archivo.tsx\" must stay exactly \"Archivo.tsx\", not \"archivo.tsx\" or \
+         \"File.tsx\") — file names are case-sensitive, so copy them through byte-for-byte, \
+         casing included. Output ONLY the \
+         translated text — no quotes, no explanation, no preamble."
     )
 }
 

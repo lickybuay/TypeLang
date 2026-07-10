@@ -14,8 +14,17 @@ pub struct LmStudioProvider {
 
 impl LmStudioProvider {
     pub fn new(base_url: String, api_key: Option<String>) -> Self {
+        let trimmed = base_url.trim_end_matches('/').to_string();
+        // LM Studio's OpenAI-compatible API lives under `/v1` — if the user
+        // configured just `http://localhost:1234`, add it rather than
+        // failing with "Unexpected endpoint or method".
+        let normalized = if trimmed.ends_with("/v1") {
+            trimmed
+        } else {
+            format!("{trimmed}/v1")
+        };
         Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: normalized,
             api_key,
         }
     }
@@ -36,7 +45,10 @@ struct ChatRequest {
 
 #[derive(Deserialize)]
 struct ChoiceMessage {
-    content: String,
+    // Some backends/models return `null` here (e.g. a tool-call-only turn)
+    // instead of an empty string — Option avoids a hard parse failure on
+    // that shape.
+    content: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +58,7 @@ struct Choice {
 
 #[derive(Deserialize)]
 struct ChatResponse {
+    #[serde(default)]
     choices: Vec<Choice>,
 }
 
@@ -99,16 +112,26 @@ impl TranslationProvider for LmStudioProvider {
             return Err(format!("LM Studio error ({status}): {raw}"));
         }
 
-        let parsed: ChatResponse = response
-            .json()
+        // Read the raw body first so a parse failure can show the actual
+        // JSON LM Studio sent back instead of just reqwest/serde's opaque
+        // "error decoding response body" — the shape varies a fair bit
+        // across backends/model chat templates.
+        let raw = response
+            .text()
             .await
-            .map_err(|e| format!("failed to parse LM Studio response: {e}"))?;
+            .map_err(|e| format!("failed to read LM Studio response: {e}"))?;
+
+        let parsed: ChatResponse = serde_json::from_str(&raw).map_err(|e| {
+            let snippet: String = raw.chars().take(500).collect();
+            format!("failed to parse LM Studio response: {e}\nraw body: {snippet}")
+        })?;
 
         parsed
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
-            .ok_or_else(|| "LM Studio response had no choices".to_string())
+            .and_then(|c| c.message.content)
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| format!("LM Studio response had no text content\nraw body: {raw}"))
     }
 }

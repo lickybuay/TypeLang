@@ -58,3 +58,8 @@ textarea.pill::placeholder {
   letter-spacing: 0.04em;
   cursor: pointer;
 }
+
+.cta-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
