@@ -1,0 +1,60 @@
+/* Shared design tokens/components between the Settings and Popup windows. */
+
+.pill {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border-radius: 999px;
+  border: none;
+  background: #1c1c1c;
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+}
+
+select.pill {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f5f5f5' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  padding-right: 40px;
+}
+
+input.pill::placeholder,
+textarea.pill::placeholder {
+  color: #8a8a8a;
+  font-weight: 400;
+}
+
+.pill-button {
+  cursor: pointer;
+  text-align: center;
+}
+
+.pill-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pill-button-secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.cta-button {
+  width: 100%;
+  padding: 16px;
+  border-radius: 999px;
+  border: none;
+  background: #111;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}

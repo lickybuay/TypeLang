@@ -1,0 +1,154 @@
+.settings {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #efefef;
+  color: #111;
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header {
+  background: linear-gradient(135deg, #ffd93d 0%, #f4c419 100%);
+  padding: 28px 24px 22px;
+  border-radius: 0 0 22px 22px;
+}
+
+.settings-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #111;
+}
+
+.settings-body {
+  flex: 1;
+  padding: 16px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.card {
+  background: #fff;
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.card h2 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b6b6b;
+  margin: 0 0 10px;
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  color: #8a8a8a;
+  margin: 10px 0 6px;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.field-label-row .field-label {
+  margin: 0;
+}
+
+.hint {
+  font-size: 11px;
+  color: #9a9a9a;
+  margin: 8px 0 0;
+}
+
+.lang-pair {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lang-pair-field {
+  flex: 1;
+}
+
+.lang-pair-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #9a9a9a;
+  margin-bottom: 6px;
+}
+
+.shortcut-recorder {
+  text-align: left;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  caret-color: transparent;
+  outline: none;
+}
+
+.shortcut-recorder.recording {
+  background: #3a3a3a;
+  outline: 2px solid #ffd93d;
+  outline-offset: 2px;
+}
+
+.status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.status-badge.ok {
+  background: #dff5e1;
+  color: #1e7d32;
+}
+
+.status-badge.warn {
+  background: #fde3e1;
+  color: #c62828;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.settings-actions .pill-button {
+  margin-bottom: 0;
+}
+
+.settings-footer {
+  padding: 18px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.footer-caption {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+.settings-message {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #6b6b6b;
+  text-align: center;
+}

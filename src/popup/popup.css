@@ -1,0 +1,86 @@
+.popup {
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 18px;
+  background: transparent;
+  overflow: hidden;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.popup-card {
+  height: 100%;
+  box-sizing: border-box;
+  background: #fff;
+  border-radius: 20px;
+  overflow: hidden;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+}
+
+.popup-langs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  cursor: move;
+  /* A little breathing room so it's an easy drag target. */
+  padding: 2px 0 4px;
+  user-select: none;
+}
+
+.popup-settings-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #9a9a9a;
+  cursor: pointer;
+}
+
+.popup-settings-button:hover {
+  background: #f0f0f0;
+  color: #555;
+}
+
+/* Compound selector (higher specificity than the bare .pill rule in
+   theme.css) so this reliably wins regardless of CSS load order. */
+.popup-input.pill {
+  border-radius: 20px;
+}
+
+.popup-input {
+  flex: 1;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  min-height: 60px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.popup-input:disabled {
+  opacity: 0.6;
+}
+
+.popup-status {
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+.popup-error {
+  font-size: 11px;
+  color: #c62828;
+}
