@@ -2,30 +2,44 @@ use serde::{Deserialize, Serialize};
 
 use super::{system_prompt, TranslationProvider};
 
-/// LM Studio exposes an OpenAI-compatible chat-completions endpoint on
-/// whatever local server the user has running (default
-/// `http://localhost:1234/v1`). No real API key is required — LM Studio
-/// doesn't validate it — so `api_key` is optional here, unlike the hosted
-/// providers.
+/// Local LLM servers (LM Studio, Ollama, llama.cpp's server, etc.) that
+/// speak the OpenAI-compatible `/v1/chat/completions` shape. No real API
+/// key is required by most of them, so `api_key` is optional here, unlike
+/// the hosted providers.
+///
+/// The `model` field matters more than it first looks: LM Studio only
+/// ignores it when a single model is loaded — with several models loaded
+/// at once (e.g. a small one dedicated to this app alongside a bigger one
+/// used for something else, both on the same `localhost:1234` server) it's
+/// exactly what routes each request to the right one. Ollama is stricter
+/// still: it 404s if the value isn't an exact, already-`ollama pull`ed tag.
+/// We always send *something* — falling back to a harmless placeholder —
+/// since an empty/missing model field is itself invalid on some servers,
+/// but leaving it unset is only safe in the single-loaded-model case.
 pub struct LmStudioProvider {
     base_url: String,
     api_key: Option<String>,
+    model: String,
 }
 
 impl LmStudioProvider {
-    pub fn new(base_url: String, api_key: Option<String>) -> Self {
+    pub fn new(base_url: String, api_key: Option<String>, model: Option<String>) -> Self {
         let trimmed = base_url.trim_end_matches('/').to_string();
-        // LM Studio's OpenAI-compatible API lives under `/v1` — if the user
-        // configured just `http://localhost:1234`, add it rather than
-        // failing with "Unexpected endpoint or method".
+        // The OpenAI-compatible API on these servers lives under `/v1` —
+        // if the user configured just `http://localhost:1234`, add it
+        // rather than failing with "Unexpected endpoint or method".
         let normalized = if trimmed.ends_with("/v1") {
             trimmed
         } else {
             format!("{trimmed}/v1")
         };
+        let model = model
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| "local-model".to_string());
         Self {
             base_url: normalized,
             api_key,
+            model,
         }
     }
 }
@@ -38,7 +52,7 @@ struct ChatMessage {
 
 #[derive(Serialize)]
 struct ChatRequest {
-    model: &'static str,
+    model: String,
     temperature: f32,
     messages: Vec<ChatMessage>,
 }
@@ -72,10 +86,7 @@ impl TranslationProvider for LmStudioProvider {
         let url = format!("{}/chat/completions", self.base_url);
 
         let body = ChatRequest {
-            // LM Studio's OpenAI-compat server serves whichever model is
-            // currently loaded regardless of this field in most setups; we
-            // don't ask the user to name it for v1.
-            model: "local-model",
+            model: self.model.clone(),
             temperature: 0.3,
             messages: vec![
                 ChatMessage {
@@ -89,19 +100,26 @@ impl TranslationProvider for LmStudioProvider {
             ],
         };
 
+        // Some local servers don't validate this at all (LM Studio, Ollama),
+        // but a handful (llama.cpp with `--api-key`, vLLM) enforce it, and
+        // an entirely missing header trips up a few client stacks even when
+        // the value itself is never checked — so always send *something*.
+        let key = self
+            .api_key
+            .as_deref()
+            .filter(|k| !k.trim().is_empty())
+            .unwrap_or("not-needed");
+
         let client = reqwest::Client::new();
-        let mut request = client
+        let request = client
             .post(&url)
             .header("content-type", "application/json")
+            .header("Authorization", format!("Bearer {key}"))
             .json(&body);
-
-        if let Some(key) = self.api_key.as_deref().filter(|k| !k.trim().is_empty()) {
-            request = request.header("Authorization", format!("Bearer {key}"));
-        }
 
         let response = request.send().await.map_err(|e| {
             format!(
-                "no se pudo conectar a LM Studio en {}: {e}",
+                "no se pudo conectar al LLM local en {}: {e}",
                 self.base_url
             )
         })?;
@@ -109,21 +127,26 @@ impl TranslationProvider for LmStudioProvider {
         if !response.status().is_success() {
             let status = response.status();
             let raw = response.text().await.unwrap_or_default();
-            return Err(format!("LM Studio error ({status}): {raw}"));
+            let hint = if status.as_u16() == 404 {
+                " (si usás Ollama, esto suele significar que el modelo no está descargado — corré `ollama pull <modelo>` primero)"
+            } else {
+                ""
+            };
+            return Err(format!("Error del LLM local ({status}){hint}: {raw}"));
         }
 
         // Read the raw body first so a parse failure can show the actual
-        // JSON LM Studio sent back instead of just reqwest/serde's opaque
+        // JSON the server sent back instead of just reqwest/serde's opaque
         // "error decoding response body" — the shape varies a fair bit
         // across backends/model chat templates.
         let raw = response
             .text()
             .await
-            .map_err(|e| format!("failed to read LM Studio response: {e}"))?;
+            .map_err(|e| format!("failed to read local LLM response: {e}"))?;
 
         let parsed: ChatResponse = serde_json::from_str(&raw).map_err(|e| {
             let snippet: String = raw.chars().take(500).collect();
-            format!("failed to parse LM Studio response: {e}\nraw body: {snippet}")
+            format!("failed to parse local LLM response: {e}\nraw body: {snippet}")
         })?;
 
         parsed
@@ -132,6 +155,6 @@ impl TranslationProvider for LmStudioProvider {
             .next()
             .and_then(|c| c.message.content)
             .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| format!("LM Studio response had no text content\nraw body: {raw}"))
+            .ok_or_else(|| format!("Local LLM response had no text content\nraw body: {raw}"))
     }
 }

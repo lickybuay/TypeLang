@@ -11,6 +11,7 @@ use crate::{keychain, settings_store};
 pub struct SettingsView {
     provider: String,
     lmstudio_base_url: String,
+    local_model: String,
     ui_language: String,
     source_lang: String,
     target_lang: String,
@@ -25,6 +26,7 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, String> {
     Ok(SettingsView {
         provider: settings.provider,
         lmstudio_base_url: settings.lmstudio_base_url,
+        local_model: settings.local_model,
         ui_language: settings.ui_language,
         source_lang: settings.source_lang,
         target_lang: settings.target_lang,
@@ -44,6 +46,13 @@ pub fn save_provider(app: AppHandle, provider: String) -> Result<(), String> {
 pub fn save_lmstudio_base_url(app: AppHandle, url: String) -> Result<(), String> {
     let mut settings = settings_store::load(&app)?;
     settings.lmstudio_base_url = url.trim().to_string();
+    settings_store::save(&app, &settings)
+}
+
+#[tauri::command]
+pub fn save_local_model(app: AppHandle, model: String) -> Result<(), String> {
+    let mut settings = settings_store::load(&app)?;
+    settings.local_model = model.trim().to_string();
     settings_store::save(&app, &settings)
 }
 

@@ -9,12 +9,13 @@ const PROVIDERS = [
   { id: "anthropic", label: "Anthropic (Claude)" },
   { id: "openai", label: "OpenAI" },
   { id: "gemini", label: "Google Gemini" },
-  { id: "lmstudio", label: "LM Studio (local)" },
+  { id: "lmstudio", label: "Local LLM" },
 ];
 
 type SettingsView = {
   provider: string;
   lmstudio_base_url: string;
+  local_model: string;
   ui_language: string;
   source_lang: string;
   target_lang: string;
@@ -27,6 +28,7 @@ function SettingsPage() {
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [localModel, setLocalModel] = useState("");
   const [sourceLang, setSourceLang] = useState("Spanish");
   const [targetLang, setTargetLang] = useState("English");
   const [shortcut, setShortcut] = useState("Alt+Shift+T");
@@ -38,6 +40,7 @@ function SettingsPage() {
       const s = await invoke<SettingsView>("get_settings");
       setProvider(s.provider);
       setBaseUrl(s.lmstudio_base_url);
+      setLocalModel(s.local_model);
       setLang(s.ui_language === "en" ? "en" : "es");
       setSourceLang(s.source_lang);
       setTargetLang(s.target_lang);
@@ -130,7 +133,16 @@ function SettingsPage() {
     }
   };
 
-  const isLmStudio = provider === "lmstudio";
+  const saveLocalModel = async () => {
+    try {
+      await invoke("save_local_model", { model: localModel });
+      setStatus(t(lang, "modelSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const isLocalLlm = provider === "lmstudio";
 
   return (
     <div className="settings">
@@ -209,7 +221,7 @@ function SettingsPage() {
             ))}
           </select>
 
-          {isLmStudio && (
+          {isLocalLlm && (
             <>
               <label className="field-label">{t(lang, "lmstudioUrlLabel")}</label>
               <input
@@ -220,13 +232,24 @@ function SettingsPage() {
                 onChange={(e) => setBaseUrl(e.target.value)}
                 onBlur={saveBaseUrl}
               />
+
+              <label className="field-label">{t(lang, "localModelLabel")}</label>
+              <input
+                className="pill"
+                type="text"
+                placeholder="e.g. gemma-4-e4b-mlx, llama3.2"
+                value={localModel}
+                onChange={(e) => setLocalModel(e.target.value)}
+                onBlur={saveLocalModel}
+              />
+              <p className="hint">{t(lang, "localModelHint")}</p>
             </>
           )}
 
           <div className="field-label-row">
             <label className="field-label">
               {t(lang, "apiKeyLabel")}
-              {isLmStudio ? t(lang, "lmstudioOptional") : ""}
+              {isLocalLlm ? t(lang, "lmstudioOptional") : ""}
             </label>
             <span className={`status-badge ${hasKey ? "ok" : "warn"}`}>
               {hasKey ? t(lang, "statusConfigured") : t(lang, "statusNotConfigured")}
@@ -235,7 +258,7 @@ function SettingsPage() {
           <input
             className="pill"
             type="password"
-            placeholder={isLmStudio ? "sk-… (opcional)" : "sk-..."}
+            placeholder={isLocalLlm ? "sk-… (opcional)" : "sk-..."}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
           />

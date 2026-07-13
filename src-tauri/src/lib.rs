@@ -37,6 +37,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::save_provider,
             commands::settings::save_lmstudio_base_url,
+            commands::settings::save_local_model,
             commands::settings::save_ui_language,
             commands::settings::save_translation_langs,
             commands::settings::save_shortcut,

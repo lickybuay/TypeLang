@@ -38,13 +38,15 @@ pub trait TranslationProvider {
 }
 
 /// Which provider is active plus whatever credentials it needs. `base_url`
-/// is only meaningful for `lmstudio`; `api_key` is optional there (LM
-/// Studio doesn't validate it) but required for the three hosted providers.
+/// and `model` are only meaningful for `lmstudio` (the generic "Local LLM"
+/// option); `api_key` is optional there (most local servers don't validate
+/// it) but required for the three hosted providers.
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
     pub provider: String,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
+    pub model: Option<String>,
 }
 
 pub async fn translate(
@@ -86,8 +88,8 @@ pub async fn translate(
                 .base_url
                 .clone()
                 .filter(|u| !u.trim().is_empty())
-                .ok_or_else(|| "Falta la URL del servidor de LM Studio. Abre Configuración.".to_string())?;
-            LmStudioProvider::new(url, cfg.api_key.clone())
+                .ok_or_else(|| "Falta la URL del servidor local. Abre Configuración.".to_string())?;
+            LmStudioProvider::new(url, cfg.api_key.clone(), cfg.model.clone())
                 .translate(text, source_lang, target_lang)
                 .await
         }

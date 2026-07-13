@@ -10,6 +10,11 @@ pub struct AppSettings {
     pub provider: String,
     #[serde(default)]
     pub lmstudio_base_url: String,
+    // Local servers vary in whether they honor this: LM Studio ignores it
+    // (serves whatever's loaded in its GUI), but Ollama routes on it and
+    // 404s if it doesn't exactly match an `ollama pull`ed tag.
+    #[serde(default)]
+    pub local_model: String,
     #[serde(default = "default_ui_language")]
     pub ui_language: String,
     #[serde(default = "default_source_lang")]
@@ -47,6 +52,7 @@ impl Default for AppSettings {
         Self {
             provider: default_provider(),
             lmstudio_base_url: String::new(),
+            local_model: String::new(),
             ui_language: default_ui_language(),
             source_lang: default_source_lang(),
             target_lang: default_target_lang(),

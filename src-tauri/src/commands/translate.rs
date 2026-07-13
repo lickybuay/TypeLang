@@ -22,6 +22,7 @@ pub async fn translate_and_paste(
         provider: settings.provider,
         api_key,
         base_url: Some(settings.lmstudio_base_url),
+        model: Some(settings.local_model),
     };
     // Providers (Claude especially) sometimes wrap the answer in a leading/
     // trailing newline despite the prompt saying "output only the text" —
