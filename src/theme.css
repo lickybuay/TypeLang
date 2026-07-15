@@ -1,38 +1,97 @@
-/* Shared design tokens/components between the Settings and Popup windows. */
+/* Shared design tokens/components between the Settings and Popup windows.
+   Values live as custom properties so the popup can re-scope a subset of
+   them (see the dark-mode block in popup.css) without touching Settings,
+   which is opened deliberately and stays light-only. */
+
+:root {
+  --ink: #111111;
+  /* Slate, not warm gray — matches the label color in the reference
+     mockup (Figma node 1:180) exactly: rgb(107,114,128). #6b7280 on white
+     is ~4.8:1, still clears WCAG AA (4.5:1). */
+  --muted: #6b7280;
+  /* Translucent glass instead of a solid fill — the reference mockup
+     treats every field (select or free-text) the same way: a soft white
+     panel over the ambient background, not a solid block. */
+  --pill-bg: rgba(255, 255, 255, 0.75);
+  --pill-text: var(--ink);
+  --pill-placeholder: #9aa1ac;
+  --pill-border: rgba(255, 255, 255, 0.9);
+  /* Decorative brand gold — gradients, left-border accents. NOT for focus
+     rings: warm/light hues measure under 2:1 against white regardless of
+     how deep you push them, so they can't carry the "must be visible"
+     job a focus indicator has. */
+  --accent: #f0b429;
+  /* --focus-ring exists because --accent can't do this job on its own:
+     dark goldenrod hits ~3.3:1 against white (passes the 3:1 floor for
+     UI-component boundaries), where --accent itself only reaches ~2:1.
+     The popup's dark-mode block flips this back to a bright gold, since
+     on a dark card the contrast problem runs the other way. */
+  --focus-ring: #b8860b;
+  /* Reserved for literal/technical values (shortcuts, URLs, model IDs) —
+     natural-language content (language names, labels, hints) stays on
+     the system sans. Native macOS fonts only, no bundled font files. */
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --transition-fast: 140ms ease;
+}
 
 .pill {
   width: 100%;
   box-sizing: border-box;
   padding: 12px 16px;
-  border-radius: 999px;
-  border: none;
-  background: #1c1c1c;
-  color: #f5f5f5;
+  /* Rounded-rectangle, not a full capsule — the reference mockup's fields
+     read as soft cards (radius 20), reserving the 999px full-pill shape
+     for the CTA button alone (see .cta-button below). */
+  border-radius: 20px;
+  border: 1px solid var(--pill-border);
+  background: var(--pill-bg);
+  color: var(--pill-text);
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 4px;
   appearance: none;
   -webkit-appearance: none;
   font-family: inherit;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 select.pill {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f5f5f5' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
+  /* Dark chevron — was white for the old solid-black pill, now sits on a
+     light glass field. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111111' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
   background-repeat: no-repeat;
   background-position: right 14px center;
   background-size: 16px;
   padding-right: 40px;
+  cursor: pointer;
 }
 
 input.pill::placeholder,
 textarea.pill::placeholder {
-  color: #8a8a8a;
+  color: var(--pill-placeholder);
   font-weight: 400;
+}
+
+.pill:focus-visible,
+.pill-button:focus-visible,
+.cta-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .pill-button {
   cursor: pointer;
   text-align: center;
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
+}
+
+.pill-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.pill-button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .pill-button:disabled {
@@ -50,16 +109,38 @@ textarea.pill::placeholder {
   padding: 16px;
   border-radius: 999px;
   border: none;
-  background: #111;
+  background: var(--ink);
   color: #fff;
   font-size: 14px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
+}
+
+.cta-button:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
 .cta-button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill,
+  .pill-button,
+  .cta-button {
+    transition: none;
+  }
+
+  .pill-button:hover:not(:disabled),
+  .cta-button:hover:not(:disabled) {
+    transform: none;
+  }
 }

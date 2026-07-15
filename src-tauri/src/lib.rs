@@ -19,6 +19,15 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin registered: it's what lets a second
+        // launch (e.g. opening the dev build while a release build, or
+        // another dev instance, is already running) detect the existing
+        // process and hand off to it instead of starting up — otherwise
+        // both processes fight over the same global shortcut, and whichever
+        // registers second silently wins, leaving the other one dead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            window::show_settings(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

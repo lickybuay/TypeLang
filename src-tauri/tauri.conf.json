@@ -17,7 +17,9 @@
         "title": "TypeLang",
         "width": 440,
         "height": 760,
-        "resizable": false,
+        "minWidth": 440,
+        "minHeight": 760,
+        "resizable": true,
         "visible": false
       }
     ],

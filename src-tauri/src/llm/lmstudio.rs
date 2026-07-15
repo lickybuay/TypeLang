@@ -54,8 +54,19 @@ struct ChatMessage {
 struct ChatRequest {
     model: String,
     temperature: f32,
+    max_tokens: u32,
     messages: Vec<ChatMessage>,
 }
+
+/// Generous headroom for what's meant to be a short chat/email fragment —
+/// high enough that a normal translation never gets near it, but bounded so
+/// a misbehaving model can't run away. Reasoning-capable local models (MoE
+/// variants especially) can spend a chunk of this "thinking" before the
+/// visible answer starts, which is exactly the scenario this is guarding
+/// against: without an explicit cap here, we're fully at the mercy of
+/// whatever response-length limit happens to be set for the model/preset in
+/// LM Studio, and a low one truncates the translation mid-word.
+const MAX_TOKENS: u32 = 1024;
 
 #[derive(Deserialize)]
 struct ChoiceMessage {
@@ -68,6 +79,13 @@ struct ChoiceMessage {
 #[derive(Deserialize)]
 struct Choice {
     message: ChoiceMessage,
+    // "length" means the server cut generation short to respect a token
+    // limit (ours or one configured server-side) — the content is a partial
+    // fragment, not a real translation, even if it happens to look
+    // plausible. Surfacing this is what catches responses like a lone "v"
+    // instead of silently pasting them.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -88,6 +106,7 @@ impl TranslationProvider for LmStudioProvider {
         let body = ChatRequest {
             model: self.model.clone(),
             temperature: 0.3,
+            max_tokens: MAX_TOKENS,
             messages: vec![
                 ChatMessage {
                     role: "system",
@@ -149,12 +168,28 @@ impl TranslationProvider for LmStudioProvider {
             format!("failed to parse local LLM response: {e}\nraw body: {snippet}")
         })?;
 
-        parsed
+        let choice = parsed
             .choices
             .into_iter()
             .next()
-            .and_then(|c| c.message.content)
-            .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| format!("Local LLM response had no text content\nraw body: {raw}"))
+            .ok_or_else(|| format!("Local LLM response had no text content\nraw body: {raw}"))?;
+
+        let text = choice
+            .message
+            .content
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| format!("Local LLM response had no text content\nraw body: {raw}"))?;
+
+        if choice.finish_reason.as_deref() == Some("length") {
+            return Err(format!(
+                "El LLM local cortó la respuesta antes de terminar (\"{text}\") — llegó al límite \
+                 de tokens. Si tu modelo tiene modo de razonamiento/\"thinking\", puede estar \
+                 gastando el presupuesto en eso antes de escribir la traducción. Subí el límite \
+                 de tokens de respuesta para este modelo/preset en tu servidor local y probá de nuevo."
+            ));
+        }
+
+        Ok(text)
     }
 }

@@ -1,8 +1,19 @@
 .settings {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #efefef;
-  color: #111;
+  /* Soft ambient blur instead of a flat fill — four loosely-placed color
+     pools (violet, sky, rose, gold) that fade to a neutral base, echoing
+     the reference mockup rather than a single flat tint. Layered radial
+     gradients read as "soft blur" without an actual filter: blur, which
+     would be expensive across a whole scrollable window. */
+  background:
+    radial-gradient(circle at 12% 10%, rgba(201, 184, 239, 0.55) 0%, transparent 42%),
+    radial-gradient(circle at 65% 6%, rgba(188, 215, 246, 0.55) 0%, transparent 40%),
+    radial-gradient(circle at 90% 45%, rgba(246, 201, 217, 0.5) 0%, transparent 42%),
+    radial-gradient(circle at 78% 96%, rgba(251, 227, 168, 0.55) 0%, transparent 45%),
+    #eef0f5;
+  background-attachment: fixed;
+  color: var(--ink);
   min-height: 100vh;
   box-sizing: border-box;
   display: flex;
@@ -10,17 +21,70 @@
 }
 
 .settings-header {
-  background: linear-gradient(135deg, #ffd93d 0%, #f4c419 100%);
-  padding: 28px 24px 22px;
-  border-radius: 0 0 22px 22px;
+  padding: 32px 24px 16px;
+}
+
+/* The window is now user-resizable (see tauri.conf.json) with the current
+   440x760 as the floor and no ceiling. Growing taller is free real estate
+   — the card stack just needs less scrolling. Growing wider isn't: a
+   single-column form stretched edge-to-edge past its comfortable measure
+   reads as broken, not spacious. Cap the content column and center it
+   inside the full-bleed header/body backgrounds instead. */
+.settings-header-top,
+.settings-tagline,
+.settings-body {
+  max-width: 560px;
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.settings-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .settings-header h1 {
   margin: 0;
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  color: #111;
+  font-size: 23px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* App language is a one-time meta preference, not part of what the app
+   does day to day — demoted from its own card into a compact corner
+   control, the same way macOS System Settings treats locale. Frees the
+   card stack below to be only the settings that define translation
+   behavior. */
+/* `select.header-lang-toggle` (not just `.header-lang-toggle`) to match
+   select.pill's specificity — otherwise select.pill's padding-right: 40px
+   wins the cascade regardless of source order and this padding is
+   ignored. */
+select.header-lang-toggle {
+  width: auto;
+  flex: none;
+  margin-bottom: 0;
+  padding: 6px 26px 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background-position: right 8px center;
+  background-size: 12px;
+}
+
+/* A live readout of the actual translation direction, not a static
+   wordmark — this is the same "X → Y" language the popup uses, so the
+   header earns its color by saying what the app is about to do instead
+   of just naming it. Updates as soon as either language select changes. */
+.settings-tagline {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.01em;
 }
 
 .settings-body {
@@ -32,27 +96,84 @@
   overflow-y: auto;
 }
 
+/* One shared panel for the whole settings list — matches the reference
+   mockup exactly (a single continuous card, not one per section). Sections
+   are grouped by spacing alone (.card-section below), not separate
+   backgrounds/shadows/borders. */
 .card {
-  background: #fff;
-  border-radius: 18px;
-  padding: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 32px;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  box-shadow: 0 20px 50px rgba(17, 17, 17, 0.06);
 }
 
 .card h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #6b6b6b;
+  color: var(--muted);
   margin: 0 0 10px;
+}
+
+.card h2 svg {
+  flex: none;
+  opacity: 0.8;
 }
 
 .field-label {
   display: block;
   font-size: 11px;
-  color: #8a8a8a;
+  color: var(--muted);
   margin: 10px 0 6px;
+}
+
+/* Wraps the API key input so its reveal toggle can sit inside the field
+   instead of competing for a row of its own. */
+.field-with-action {
+  position: relative;
+}
+
+.field-with-action .pill {
+  padding-right: 44px;
+}
+
+.field-action-button {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(calc(-50% - 2px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.field-action-button:hover {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-action-button {
+    transition: none;
+  }
 }
 
 .field-label-row {
@@ -68,7 +189,7 @@
 
 .hint {
   font-size: 11px;
-  color: #9a9a9a;
+  color: var(--muted);
   margin: 8px 0 0;
 }
 
@@ -87,21 +208,39 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #9a9a9a;
+  color: var(--muted);
   margin-bottom: 6px;
 }
 
+/* Exact key-combo strings, a server URL, a model identifier — literal
+   values worth setting apart from the surrounding prose/labels, which
+   stay on the system sans. No bundled font: ui-monospace resolves to
+   SF Mono on macOS for free. */
+.pill-mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* Selects and free-text fields (a URL, a model name, a key) now share the
+   same translucent-glass .pill treatment from theme.css — the reference
+   mockup doesn't distinguish "choice" from "value" fields by weight, so
+   this app doesn't either anymore. */
 .shortcut-recorder {
   text-align: left;
   cursor: pointer;
-  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.02em;
   caret-color: transparent;
-  outline: none;
 }
 
+/* Recording starts on focus (see ShortcutRecorder.tsx's onFocus), so this
+   doubles as the field's focus indicator — no separate :focus-visible rule
+   needed here, unlike the rest of the pills. */
 .shortcut-recorder.recording {
   background: #3a3a3a;
-  outline: 2px solid #ffd93d;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -113,14 +252,17 @@
   white-space: nowrap;
 }
 
+/* Both re-hued slightly warmer than the original Material-green/red so
+   they sit next to the amber accent instead of fighting it — still
+   comfortably clear "good"/"bad" reds and greens, just not cool-toned. */
 .status-badge.ok {
-  background: #dff5e1;
-  color: #1e7d32;
+  background: #e4ede6;
+  color: #3f6b4e;
 }
 
 .status-badge.warn {
-  background: #fde3e1;
-  color: #c62828;
+  background: #fbe4e1;
+  color: #b23434;
 }
 
 .settings-actions {
@@ -140,15 +282,23 @@
   align-items: center;
 }
 
+/* Same content cap as the header/body — otherwise the CTA (width: 100% by
+   design, see .cta-button in theme.css) stretches edge-to-edge on a wide
+   window instead of staying a comfortable button width. */
+.settings-footer > * {
+  width: 100%;
+  max-width: 560px;
+}
+
 .footer-caption {
   margin: 12px 0 0;
   font-size: 11px;
-  color: #9a9a9a;
+  color: var(--muted);
 }
 
 .settings-message {
   margin: 8px 0 0;
   font-size: 11px;
-  color: #6b6b6b;
+  color: var(--muted);
   text-align: center;
 }

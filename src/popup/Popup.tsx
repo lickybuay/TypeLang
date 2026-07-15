@@ -27,6 +27,11 @@ function Popup() {
   const [lang, setLang] = useState<Lang>("es");
   const [sourceLang, setSourceLang] = useState("Spanish");
   const [targetLang, setTargetLang] = useState("English");
+  // Bumped on every "popup-reset" so the card below remounts and replays
+  // its CSS entrance animation — the window itself is reused (hidden, not
+  // destroyed) across shortcut presses, so a plain mount-only animation
+  // would only ever play once.
+  const [revealKey, setRevealKey] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -62,6 +67,7 @@ function Popup() {
     setText("");
     setError(null);
     setLoading(false);
+    setRevealKey((k) => k + 1);
     inputRef.current?.focus();
     if (inputRef.current) inputRef.current.style.height = "";
     getCurrentWindow()
@@ -120,7 +126,7 @@ function Popup() {
         }
       }}
     >
-      <div className="popup-card" ref={cardRef}>
+      <div className="popup-card" ref={cardRef} key={revealKey}>
         <div className="popup-langs" data-tauri-drag-region="">
           <span>
             {sourceLang} → {targetLang}
@@ -149,6 +155,7 @@ function Popup() {
         />
         {loading && <div className="popup-status">{t(lang, "popupTranslating")}</div>}
         {error && <div className="popup-error">{error}</div>}
+        {!loading && !error && <div className="popup-hint">{t(lang, "popupHint")}</div>}
       </div>
     </div>
   );

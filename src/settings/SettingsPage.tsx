@@ -12,6 +12,69 @@ const PROVIDERS = [
   { id: "lmstudio", label: "Local LLM" },
 ];
 
+// Small inline icons for each card heading — same stroke style as the
+// popup's gear icon, sized to sit inline with the uppercase section
+// labels. aria-hidden since the label text already names the section.
+const iconProps = {
+  width: 13,
+  height: 13,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
+function IconLanguages() {
+  return (
+    <svg {...iconProps}>
+      <path d="M8 3 4 7l4 4" />
+      <path d="M4 7h16" />
+      <path d="M16 21l4-4-4-4" />
+      <path d="M20 17H4" />
+    </svg>
+  );
+}
+
+function IconKeyboard() {
+  return (
+    <svg {...iconProps}>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12" />
+    </svg>
+  );
+}
+
+function IconServer() {
+  return (
+    <svg {...iconProps}>
+      <rect x="3" y="4" width="18" height="7" rx="1.5" />
+      <rect x="3" y="13" width="18" height="7" rx="1.5" />
+      <path d="M7 8h.01M7 17h.01" />
+    </svg>
+  );
+}
+
+// Show/hide toggle for the API key field — the one field on this page that
+// actually hides its value (type="password"), so a reveal affordance has
+// real use, unlike Server URL/Model which are already plain text.
+function IconEye({ open }: { open: boolean }) {
+  const eyeProps = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  return open ? (
+    <svg {...eyeProps}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg {...eyeProps}>
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a20.3 20.3 0 0 1 4.22-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a20.4 20.4 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+      <path d="M1 1l22 22" />
+    </svg>
+  );
+}
+
 type SettingsView = {
   provider: string;
   lmstudio_base_url: string;
@@ -34,6 +97,7 @@ function SettingsPage() {
   const [shortcut, setShortcut] = useState("Alt+Shift+T");
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
 
   const refresh = async () => {
     try {
@@ -102,16 +166,25 @@ function SettingsPage() {
     await refresh();
   };
 
-  const saveKey = async () => {
-    if (!apiKey.trim()) return;
-    try {
-      await invoke("save_api_key", { provider, key: apiKey });
-      setApiKey("");
-      setStatus(t(lang, "keySaved"));
-      await refresh();
-    } catch (e) {
-      setStatus(`Error: ${e}`);
+  // Every other field on this page already saves itself on blur — this is
+  // the one exception, since typing an API key then losing focus (e.g. to
+  // check something) shouldn't silently persist a half-typed secret. The
+  // button used to be scoped (and named) to just that, but it reads as a
+  // general "save my changes" action, so it always confirms now instead of
+  // sitting disabled whenever the key field happens to be empty.
+  const updateSettings = async () => {
+    if (apiKey.trim()) {
+      try {
+        await invoke("save_api_key", { provider, key: apiKey });
+        setApiKey("");
+        setStatus(t(lang, "keySaved"));
+        await refresh();
+      } catch (e) {
+        setStatus(`Error: ${e}`);
+      }
+      return;
     }
+    setStatus(t(lang, "settingsUpdated"));
   };
 
   const clearKey = async () => {
@@ -147,27 +220,41 @@ function SettingsPage() {
   return (
     <div className="settings">
       <header className="settings-header">
-        <h1>{t(lang, "appTitle")}</h1>
-      </header>
-
-      <main className="settings-body">
-        <section className="card">
-          <h2>{t(lang, "uiLanguageSection")}</h2>
+        <div className="settings-header-top">
+          <h1>{t(lang, "appTitle")}</h1>
+          {/* App language is a one-time preference, not part of what the
+              app does day to day — a compact corner control instead of
+              its own card, same treatment macOS System Settings gives
+              locale. */}
           <select
-            className="pill"
+            className="pill header-lang-toggle"
             value={lang}
             onChange={(e) => changeUiLanguage(e.target.value as Lang)}
+            aria-label={t(lang, "uiLanguageSection")}
           >
             {LANGUAGE_OPTIONS.map((o) => (
               <option key={o.code} value={o.code}>
-                {o.label}
+                {o.code.toUpperCase()}
               </option>
             ))}
           </select>
-        </section>
+        </div>
+        {/* Live readout of the actual translation direction, not just a
+            static wordmark — the header earns its color by saying what
+            the app is about to do, the same "X → Y" language the popup
+            uses for the same purpose. */}
+        <p className="settings-tagline">
+          {sourceLang} <span aria-hidden="true">→</span> {targetLang}
+        </p>
+      </header>
 
-        <section className="card">
-          <h2>{t(lang, "translationLangsSection")}</h2>
+      <main className="settings-body">
+        <div className="card">
+        <section className="card-section">
+          <h2>
+            <IconLanguages />
+            {t(lang, "translationLangsSection")}
+          </h2>
           <div className="lang-pair">
             <div className="lang-pair-field">
               <span className="lang-pair-label">{t(lang, "from")}</span>
@@ -200,15 +287,21 @@ function SettingsPage() {
           </div>
         </section>
 
-        <section className="card">
-          <h2>{t(lang, "shortcutSection")}</h2>
+        <section className="card-section">
+          <h2>
+            <IconKeyboard />
+            {t(lang, "shortcutSection")}
+          </h2>
           <label className="field-label">{t(lang, "shortcutLabel")}</label>
           <ShortcutRecorder lang={lang} value={shortcut} onSave={saveShortcut} />
           <p className="hint">{t(lang, "shortcutHint")}</p>
         </section>
 
-        <section className="card">
-          <h2>{t(lang, "providerSection")}</h2>
+        <section className="card-section">
+          <h2>
+            <IconServer />
+            {t(lang, "providerSection")}
+          </h2>
           <select
             className="pill"
             value={provider}
@@ -225,7 +318,7 @@ function SettingsPage() {
             <>
               <label className="field-label">{t(lang, "lmstudioUrlLabel")}</label>
               <input
-                className="pill"
+                className="pill pill-mono"
                 type="text"
                 placeholder="http://localhost:1234/v1"
                 value={baseUrl}
@@ -235,7 +328,7 @@ function SettingsPage() {
 
               <label className="field-label">{t(lang, "localModelLabel")}</label>
               <input
-                className="pill"
+                className="pill pill-mono"
                 type="text"
                 placeholder="e.g. gemma-4-e4b-mlx, llama3.2"
                 value={localModel}
@@ -249,34 +342,47 @@ function SettingsPage() {
           <div className="field-label-row">
             <label className="field-label">
               {t(lang, "apiKeyLabel")}
-              {isLocalLlm ? t(lang, "lmstudioOptional") : ""}
+              {isLocalLlm ? t(lang, "localApiKeyOptional") : ""}
             </label>
             <span className={`status-badge ${hasKey ? "ok" : "warn"}`}>
               {hasKey ? t(lang, "statusConfigured") : t(lang, "statusNotConfigured")}
             </span>
           </div>
-          <input
-            className="pill"
-            type="password"
-            placeholder={isLocalLlm ? "sk-… (opcional)" : "sk-..."}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-          <div className="settings-actions">
+          <div className="field-with-action">
+            <input
+              className="pill"
+              type={showKey ? "text" : "password"}
+              placeholder={isLocalLlm ? "sk-… (opcional)" : "sk-..."}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
             <button
-              className="pill pill-button pill-button-secondary"
-              onClick={clearKey}
-              disabled={!hasKey}
+              type="button"
+              className="field-action-button"
+              onClick={() => setShowKey((v) => !v)}
+              aria-label={showKey ? "Hide API key" : "Show API key"}
             >
-              {t(lang, "delete")}
+              <IconEye open={showKey} />
             </button>
           </div>
+          {hasKey && (
+            <div className="settings-actions">
+              <button
+                className="pill pill-button pill-button-secondary"
+                onClick={clearKey}
+              >
+                {t(lang, "delete")}
+              </button>
+            </div>
+          )}
         </section>
+        </div>
       </main>
 
       <footer className="settings-footer">
-        <button className="cta-button" onClick={saveKey} disabled={!apiKey.trim()}>
-          {t(lang, "saveConfig")}
+        <button className="cta-button" onClick={updateSettings}>
+          {t(lang, "updateSettings")}
+          <span aria-hidden="true">→</span>
         </button>
         <p className="footer-caption">🔒 {t(lang, "savedLocally")}</p>
         {status && <p className="settings-message">{status}</p>}
