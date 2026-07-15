@@ -4,9 +4,7 @@ A tiny menu-bar app for macOS that translates what you're typing — anywhere �
 
 Press a global keyboard shortcut, a small floating window appears wherever your cursor is, type in your language, hit Enter — the natural translation is pasted directly into the field you were writing in. No copy-pasting into a browser tab, no breaking your flow.
 
-<video src="example-usage.mp4" controls width="480">
-  See TypeLang translate a line of text via its floating popup — <a href="example-usage.mp4">example-usage.mp4</a>.
-</video>
+![TypeLang translating a line of text via its floating popup](example-usage.gif)
 
 ## Why
 
