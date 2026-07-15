@@ -1,3 +1,4 @@
+mod accessibility;
 mod commands;
 mod focus;
 mod keychain;
@@ -64,6 +65,15 @@ pub fn run() {
             app.global_shortcut().register(hotkey)?;
 
             tray::setup(handle)?;
+
+            // Fires the system's Accessibility permission dialog on first
+            // launch instead of waiting for the first translate attempt to
+            // silently fail — macOS only shows this prompt once per app per
+            // launch, so calling it here (rather than lazily in paste.rs)
+            // means it's already resolved by the time the user tries to
+            // paste anything.
+            #[cfg(target_os = "macos")]
+            accessibility::request_trust();
 
             // The settings window is the "main" one from tauri.conf.json. It
             // starts hidden (menu-bar-only app); clicking its close button

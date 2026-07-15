@@ -3,6 +3,8 @@ use enigo::{
     Enigo, Key, Keyboard, Settings,
 };
 
+use crate::accessibility;
+
 /// Swaps the OS clipboard to `text`, simulates a paste keystroke, then
 /// restores whatever was on the clipboard before. Caller is responsible for
 /// having already reactivated the target app (see `focus::restore`) so the
@@ -11,6 +13,20 @@ use enigo::{
 /// macOS-only for the Phase 1 MVP: uses Cmd+V. Windows/Linux paste-simulation
 /// (Ctrl+V, different focus APIs) is Phase 3/4 scope per the plan.
 pub fn paste_text(text: &str) -> Result<(), String> {
+    // enigo's CGEventPost-based key simulation doesn't error without
+    // Accessibility trust — the event is silently dropped by the OS, so
+    // every call below would still return Ok(()) with nothing actually
+    // pasted. Checking up front turns that into a real, visible error.
+    if !accessibility::is_trusted() {
+        accessibility::request_trust();
+        return Err(
+            "TypeLang necesita el permiso de Accesibilidad para pegar el texto traducido. \
+             Concedelo en Configuración del Sistema → Privacidad y Seguridad → Accesibilidad, \
+             y probá de nuevo."
+                .to_string(),
+        );
+    }
+
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let original = clipboard.get_text().unwrap_or_default();
 
