@@ -1,3 +1,5 @@
+<img src="src-tauri/icons/icon.png" alt="TypeLang icon" width="96" height="96">
+
 # TypeLang
 
 A tiny menu-bar app for macOS that translates what you're typing — anywhere — into natural, professional English (or whatever language pair you set), without leaving the app you're working in.
