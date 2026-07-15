@@ -71,10 +71,10 @@ const dict = {
   },
 } as const;
 
-export type DictKey = keyof (typeof dict)["es"];
+export type DictKey = keyof (typeof dict)["en"];
 
 export function t(lang: Lang, key: DictKey): string {
-  return dict[lang]?.[key] ?? dict.es[key];
+  return dict[lang]?.[key] ?? dict.en[key];
 }
 
 export const LANGUAGE_OPTIONS = [

@@ -87,7 +87,7 @@ type SettingsView = {
 };
 
 function SettingsPage() {
-  const [lang, setLang] = useState<Lang>("es");
+  const [lang, setLang] = useState<Lang>("en");
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -105,7 +105,7 @@ function SettingsPage() {
       setProvider(s.provider);
       setBaseUrl(s.lmstudio_base_url);
       setLocalModel(s.local_model);
-      setLang(s.ui_language === "en" ? "en" : "es");
+      setLang(s.ui_language === "es" ? "es" : "en");
       setSourceLang(s.source_lang);
       setTargetLang(s.target_lang);
       setShortcut(s.shortcut);

@@ -5,7 +5,7 @@ use tauri::AppHandle;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tokio::sync::oneshot;
 
-use crate::{keychain, settings_store};
+use crate::{keychain, settings_store, tray};
 
 #[derive(Serialize)]
 pub struct SettingsView {
@@ -59,8 +59,10 @@ pub fn save_local_model(app: AppHandle, model: String) -> Result<(), String> {
 #[tauri::command]
 pub fn save_ui_language(app: AppHandle, language: String) -> Result<(), String> {
     let mut settings = settings_store::load(&app)?;
-    settings.ui_language = language;
-    settings_store::save(&app, &settings)
+    settings.ui_language = language.clone();
+    settings_store::save(&app, &settings)?;
+    tray::update_language(&app, &language);
+    Ok(())
 }
 
 #[tauri::command]

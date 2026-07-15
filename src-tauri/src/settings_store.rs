@@ -30,7 +30,7 @@ fn default_provider() -> String {
 }
 
 fn default_ui_language() -> String {
-    "es".to_string()
+    "en".to_string()
 }
 
 fn default_source_lang() -> String {

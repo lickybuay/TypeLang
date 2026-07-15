@@ -24,7 +24,7 @@ function Popup() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lang, setLang] = useState<Lang>("es");
+  const [lang, setLang] = useState<Lang>("en");
   const [sourceLang, setSourceLang] = useState("Spanish");
   const [targetLang, setTargetLang] = useState("English");
   // Bumped on every "popup-reset" so the card below remounts and replays
@@ -55,7 +55,7 @@ function Popup() {
   const fetchLangs = async () => {
     try {
       const s = await invoke<SettingsView>("get_settings");
-      setLang(s.ui_language === "en" ? "en" : "es");
+      setLang(s.ui_language === "es" ? "es" : "en");
       setSourceLang(s.source_lang);
       setTargetLang(s.target_lang);
     } catch {
