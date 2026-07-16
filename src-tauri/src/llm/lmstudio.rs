@@ -100,6 +100,7 @@ impl TranslationProvider for LmStudioProvider {
         text: &str,
         source_lang: &str,
         target_lang: &str,
+        tone: &str,
     ) -> Result<String, String> {
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -110,7 +111,7 @@ impl TranslationProvider for LmStudioProvider {
             messages: vec![
                 ChatMessage {
                     role: "system",
-                    content: system_prompt(source_lang, target_lang),
+                    content: system_prompt(source_lang, target_lang, tone),
                 },
                 ChatMessage {
                     role: "user",

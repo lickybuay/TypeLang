@@ -16,6 +16,7 @@ pub struct SettingsView {
     source_lang: String,
     target_lang: String,
     shortcut: String,
+    tone: String,
     has_api_key: bool,
 }
 
@@ -31,6 +32,7 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, String> {
         source_lang: settings.source_lang,
         target_lang: settings.target_lang,
         shortcut: settings.shortcut,
+        tone: settings.tone,
         has_api_key,
     })
 }
@@ -62,6 +64,15 @@ pub fn save_ui_language(app: AppHandle, language: String) -> Result<(), String> 
     settings.ui_language = language.clone();
     settings_store::save(&app, &settings)?;
     tray::update_language(&app, &language);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_tone(app: AppHandle, tone: String) -> Result<(), String> {
+    let mut settings = settings_store::load(&app)?;
+    settings.tone = tone.clone();
+    settings_store::save(&app, &settings)?;
+    tray::update_tone(&app, &tone);
     Ok(())
 }
 

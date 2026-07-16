@@ -108,6 +108,114 @@
   user-select: none;
 }
 
+.popup-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Positions the dropdown relative to the badge that opens it. */
+.tone-picker {
+  position: relative;
+}
+
+/* Quiet by default (professional == the usual case, shouldn't compete for
+   attention) — switches to the accent color when Tab or a dropdown pick
+   overrides it for this one message, so the one-off state is the one that
+   visibly stands out. A button, not a static label — click opens the
+   dropdown below; Tab is the other way to reach the same toggle. */
+.tone-badge {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.tone-badge svg {
+  flex: none;
+  opacity: 0.7;
+}
+
+.tone-badge.tone-professional {
+  background: rgba(17, 17, 17, 0.06);
+  color: var(--muted);
+}
+
+.tone-badge.tone-casual {
+  background: var(--accent);
+  color: #111;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tone-badge.tone-professional {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tone-badge {
+    transition: none;
+  }
+}
+
+/* Small popover, not a native <select> — keeps the same dark recessed
+   look as the rest of the popup's interactive surfaces (the textarea)
+   instead of an OS-chrome dropdown that would look out of place on a
+   borderless floating window. */
+.tone-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  min-width: 108px;
+  background: #17171a;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.tone-menu-option {
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #d4d4d8;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.tone-menu-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.tone-menu-option.active {
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tone-menu-option {
+    transition: none;
+  }
+}
+
 .popup-settings-button {
   display: flex;
   align-items: center;

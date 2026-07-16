@@ -23,6 +23,10 @@ pub struct AppSettings {
     pub target_lang: String,
     #[serde(default = "default_shortcut")]
     pub shortcut: String,
+    // App-wide default; the popup can override it per-message (Tab) without
+    // touching this — see llm::system_prompt and commands/translate.rs.
+    #[serde(default = "default_tone")]
+    pub tone: String,
 }
 
 fn default_provider() -> String {
@@ -31,6 +35,10 @@ fn default_provider() -> String {
 
 fn default_ui_language() -> String {
     "en".to_string()
+}
+
+fn default_tone() -> String {
+    "professional".to_string()
 }
 
 fn default_source_lang() -> String {
@@ -57,6 +65,7 @@ impl Default for AppSettings {
             source_lang: default_source_lang(),
             target_lang: default_target_lang(),
             shortcut: default_shortcut(),
+            tone: default_tone(),
         }
     }
 }

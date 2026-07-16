@@ -212,6 +212,46 @@ select.header-lang-toggle {
   margin-bottom: 6px;
 }
 
+/* Segmented control, not a select — there are only two states and both are
+   worth seeing at a glance (a dropdown would hide the option you're not
+   on). Recessed track so the active side reads as "pressed in". */
+.tone-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(17, 17, 17, 0.06);
+  border-radius: 16px;
+}
+
+.tone-toggle-button {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.tone-toggle-button.active {
+  background: var(--ink);
+  color: #fff;
+}
+
+.tone-toggle-button:not(.active):hover {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tone-toggle-button {
+    transition: none;
+  }
+}
+
 /* Exact key-combo strings, a server URL, a model identifier — literal
    values worth setting apart from the surrounding prose/labels, which
    stay on the system sans. No bundled font: ui-monospace resolves to

@@ -59,6 +59,7 @@ impl TranslationProvider for OpenAiProvider {
         text: &str,
         source_lang: &str,
         target_lang: &str,
+        tone: &str,
     ) -> Result<String, String> {
         let body = ChatRequest {
             model: MODEL,
@@ -66,7 +67,7 @@ impl TranslationProvider for OpenAiProvider {
             messages: vec![
                 ChatMessage {
                     role: "system",
-                    content: system_prompt(source_lang, target_lang),
+                    content: system_prompt(source_lang, target_lang, tone),
                 },
                 ChatMessage {
                     role: "user",

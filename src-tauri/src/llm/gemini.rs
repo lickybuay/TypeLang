@@ -80,6 +80,7 @@ impl TranslationProvider for GeminiProvider {
         text: &str,
         source_lang: &str,
         target_lang: &str,
+        tone: &str,
     ) -> Result<String, String> {
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={}",
@@ -89,7 +90,7 @@ impl TranslationProvider for GeminiProvider {
         let body = GenerateRequest {
             system_instruction: SystemInstruction {
                 parts: vec![Part {
-                    text: system_prompt(source_lang, target_lang),
+                    text: system_prompt(source_lang, target_lang, tone),
                 }],
             },
             contents: vec![Content {

@@ -47,6 +47,14 @@ function IconKeyboard() {
   );
 }
 
+function IconTone() {
+  return (
+    <svg {...iconProps}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
 function IconServer() {
   return (
     <svg {...iconProps}>
@@ -83,6 +91,7 @@ type SettingsView = {
   source_lang: string;
   target_lang: string;
   shortcut: string;
+  tone: string;
   has_api_key: boolean;
 };
 
@@ -95,6 +104,7 @@ function SettingsPage() {
   const [sourceLang, setSourceLang] = useState("Spanish");
   const [targetLang, setTargetLang] = useState("English");
   const [shortcut, setShortcut] = useState("Alt+Shift+T");
+  const [tone, setTone] = useState("professional");
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
@@ -109,6 +119,7 @@ function SettingsPage() {
       setSourceLang(s.source_lang);
       setTargetLang(s.target_lang);
       setShortcut(s.shortcut);
+      setTone(s.tone === "casual" ? "casual" : "professional");
       setHasKey(s.has_api_key);
     } catch (e) {
       setStatus(`${t(lang, "settingsReadError")}: ${e}`);
@@ -139,6 +150,16 @@ function SettingsPage() {
         sourceLang: nextSource,
         targetLang: nextTarget,
       });
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const changeTone = async (next: string) => {
+    setTone(next);
+    try {
+      await invoke("save_tone", { tone: next });
+      setStatus(t(lang, "toneSaved"));
     } catch (e) {
       setStatus(`Error: ${e}`);
     }
@@ -285,6 +306,30 @@ function SettingsPage() {
               </select>
             </div>
           </div>
+        </section>
+
+        <section className="card-section">
+          <h2>
+            <IconTone />
+            {t(lang, "toneSection")}
+          </h2>
+          <div className="tone-toggle" role="group" aria-label={t(lang, "toneSection")}>
+            <button
+              type="button"
+              className={`tone-toggle-button${tone === "professional" ? " active" : ""}`}
+              onClick={() => changeTone("professional")}
+            >
+              {t(lang, "toneProfessional")}
+            </button>
+            <button
+              type="button"
+              className={`tone-toggle-button${tone === "casual" ? " active" : ""}`}
+              onClick={() => changeTone("casual")}
+            >
+              {t(lang, "toneCasual")}
+            </button>
+          </div>
+          <p className="hint">{t(lang, "toneHint")}</p>
         </section>
 
         <section className="card-section">

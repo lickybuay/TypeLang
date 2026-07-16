@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use tauri::menu::MenuItem;
+use tauri::menu::{CheckMenuItem, MenuItem};
 
 use crate::focus::FocusedApp;
 
@@ -13,6 +13,13 @@ pub struct TrayMenuItems {
     pub quit: MenuItem<tauri::Wry>,
 }
 
+/// The tray's tone submenu checkboxes — `tray::update_tone` flips these
+/// in place (and off each other) instead of rebuilding the menu.
+pub struct TrayToneItems {
+    pub professional: CheckMenuItem<tauri::Wry>,
+    pub casual: CheckMenuItem<tauri::Wry>,
+}
+
 /// Shared app state. Holds the app that had focus right before the popup
 /// opened, so the translate command knows where to paste once the user
 /// submits.
@@ -20,4 +27,5 @@ pub struct TrayMenuItems {
 pub struct AppState {
     pub captured_focus: Mutex<Option<FocusedApp>>,
     pub tray_items: Mutex<Option<TrayMenuItems>>,
+    pub tray_tone_items: Mutex<Option<TrayToneItems>>,
 }
