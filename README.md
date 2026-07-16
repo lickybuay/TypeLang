@@ -19,7 +19,10 @@ Non-literal translation. If you speak, say, Spanish and work with English-speaki
 - **Configurable translation direction** — pick source/target languages from Settings, not hardcoded to one pair.
 - **Bilingual interface** — Spanish and English UI, switchable in Settings.
 - **Auto-paste, not copy-paste** — the translation lands directly in the field you were typing in, with your original clipboard contents restored afterward.
+- **Quick tone toggle** — switch between professional and casual right from the tray menu (sets the default) or per-message from the popup itself (Tab, or click the tone badge for a dropdown) — handy for jumping between work chats and personal messages without opening Settings.
 - **Menu-bar only** — no Dock icon, stays out of the way until you need it.
+
+![Switching between professional and casual tone from the popup](tone-toggle.gif)
 
 ## Status
 
