@@ -8,6 +8,8 @@ Press a global keyboard shortcut, a small floating window appears wherever your 
 
 ![TypeLang translating a line of text via its floating popup](example-usage.gif)
 
+> **New in 0.2.0:** voice dictation (🎤 in the popup, or hold `Alt+Shift+D` anywhere), custom vocabulary, snippets, optional autostart of local AI servers, and a fix for the paste that sometimes typed a single letter instead of the translation. Upgrading from 0.1.0? See the [upgrade notes](CHANGELOG.md#upgrading-from-010) — you'll need to re-grant Accessibility once. Full list in the [CHANGELOG](CHANGELOG.md).
+
 ## Why
 
 Non-literal translation. If you speak, say, Spanish and work with English-speaking colleagues, tools like Google Translate produce stiff, word-for-word English. TypeLang sends your text to an LLM (Claude, GPT, Gemini, or a local model through any OpenAI-compatible server such as LM Studio or llama.cpp) with a prompt tuned for natural, idiomatic, professional phrasing — the way a fluent bilingual coworker would actually write it.

@@ -1,6 +1,6 @@
 [package]
 name = "typelang"
-version = "0.1.0"
+version = "0.2.0"
 description = "TypeLang — quick natural translation, anywhere you type"
 authors = ["Sergio"]
 edition = "2021"
