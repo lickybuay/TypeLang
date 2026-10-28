@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, PromptOptions, TranslationProvider};
+use super::{system_prompt, user_message, PromptOptions, TranslationProvider};
 
 /// Local LLM servers (LM Studio, Ollama, llama.cpp's server, etc.) that
 /// speak the OpenAI-compatible `/v1/chat/completions` shape. No real API
@@ -116,7 +116,7 @@ impl TranslationProvider for LmStudioProvider {
                 },
                 ChatMessage {
                     role: "user",
-                    content: text.to_string(),
+                    content: user_message(text, opts).into_owned(),
                 },
             ],
         };
@@ -140,8 +140,9 @@ impl TranslationProvider for LmStudioProvider {
 
         let response = request.send().await.map_err(|e| {
             format!(
-                "no se pudo conectar al LLM local en {}: {e}",
-                self.base_url
+                "no se pudo conectar al LLM local en {}: {}",
+                self.base_url,
+                e.without_url()
             )
         })?;
 
@@ -163,7 +164,7 @@ impl TranslationProvider for LmStudioProvider {
         let raw = response
             .text()
             .await
-            .map_err(|e| format!("failed to read local LLM response: {e}"))?;
+            .map_err(|e| format!("failed to read local LLM response: {}", e.without_url()))?;
 
         let parsed: ChatResponse = serde_json::from_str(&raw).map_err(|e| {
             let snippet: String = raw.chars().take(500).collect();

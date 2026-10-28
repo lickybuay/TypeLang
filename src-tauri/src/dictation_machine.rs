@@ -24,6 +24,10 @@ pub const HOTKEY_MAX_SECS: u64 = 300;
 pub const HINT_SHOWN: Duration = Duration::from_millis(1500);
 pub const ERROR_PILL_SHOWN: Duration = Duration::from_secs(3);
 pub const ERROR_TRAY_SHOWN: Duration = Duration::from_secs(4);
+/// A pasted-anyway notice ("pasted without improving") is milder than an
+/// error, so the pill drops it a little sooner.
+pub const NOTICE_PILL_SHOWN: Duration = Duration::from_secs(3);
+pub const NOTICE_TRAY_SHOWN: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Phase {
@@ -76,7 +80,13 @@ pub enum Event {
     Captured { gen: u64 },
     AudioStarted { gen: u64, at_ms: u64 },
     StartFailed { gen: u64, message: String },
-    JobFinished { gen: u64, error: Option<String> },
+    /// `error` failed the job; `notice` is a success that deserves a word (the
+    /// text was pasted, but not the way the user asked for). `error` wins.
+    JobFinished {
+        gen: u64,
+        error: Option<String>,
+        notice: Option<String>,
+    },
     Timer { kind: TimerKind, gen: u64 },
 }
 
@@ -88,6 +98,7 @@ pub enum PillView {
     Processing,
     Hint,
     Error(String),
+    Notice(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +107,7 @@ pub enum TrayView {
     Recording,
     Working,
     Error(String),
+    Notice(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +192,22 @@ fn show_error(next: &mut Machine, message: String, out: &mut Vec<Action>) {
         kind: TimerKind::ClearTray,
         gen,
         after: ERROR_TRAY_SHOWN,
+    });
+}
+
+fn show_notice(next: &mut Machine, message: String, out: &mut Vec<Action>) {
+    out.push(Action::Tray(TrayView::Notice(message.clone())));
+    set_pill(next, out, Some(PillView::Notice(message)));
+    let gen = next.gen;
+    out.push(Action::Arm {
+        kind: TimerKind::HidePill,
+        gen,
+        after: NOTICE_PILL_SHOWN,
+    });
+    out.push(Action::Arm {
+        kind: TimerKind::ClearTray,
+        gen,
+        after: NOTICE_TRAY_SHOWN,
     });
 }
 
@@ -273,16 +301,17 @@ pub fn step(m: &Machine, event: Event, now: Instant) -> (Machine, Vec<Action>) {
                 show_error(&mut next, message, &mut out);
             }
         }
-        Event::JobFinished { gen, error } => {
+        Event::JobFinished { gen, error, notice } => {
             if gen == m.gen && m.phase == Phase::Processing {
                 next.phase = Phase::Idle;
                 next.started_at_ms = None;
-                match error {
-                    None => {
+                match (error, notice) {
+                    (Some(message), _) => show_error(&mut next, message, &mut out),
+                    (None, Some(message)) => show_notice(&mut next, message, &mut out),
+                    (None, None) => {
                         set_pill(&mut next, &mut out, None);
                         out.push(Action::Tray(TrayView::Clear));
                     }
-                    Some(message) => show_error(&mut next, message, &mut out),
                 }
             }
         }
@@ -607,8 +636,9 @@ mod tests {
                 Event::AudioStarted { gen: old, at_ms: 9 },
                 Event::Captured { gen: old },
                 Event::StartFailed { gen: old, message: "boom".into() },
-                Event::JobFinished { gen: old, error: None },
-                Event::JobFinished { gen: old, error: Some("e".into()) },
+                Event::JobFinished { gen: old, error: None, notice: None },
+                Event::JobFinished { gen: old, error: Some("e".into()), notice: None },
+                Event::JobFinished { gen: old, error: None, notice: Some("n".into()) },
             ];
             for e in events {
                 assert_noop(&m, e);
@@ -742,7 +772,7 @@ mod tests {
     fn job_finished_ok_returns_to_idle_and_hides_pill() {
         let (next, actions) = step(
             &processing(),
-            Event::JobFinished { gen: 1, error: None },
+            Event::JobFinished { gen: 1, error: None, notice: None },
             Instant::now(),
         );
         assert_eq!(next.phase, Phase::Idle);
@@ -755,7 +785,7 @@ mod tests {
     fn job_finished_err_shows_error_pill_and_arms_timers() {
         let (next, actions) = step(
             &processing(),
-            Event::JobFinished { gen: 1, error: Some("api".into()) },
+            Event::JobFinished { gen: 1, error: Some("api".into()), notice: None },
             Instant::now(),
         );
         assert_eq!(next.phase, Phase::Idle);
@@ -773,16 +803,87 @@ mod tests {
     }
 
     #[test]
+    fn job_finished_ok_with_notice_goes_idle_and_shows_notice_pill() {
+        let (next, actions) = step(
+            &processing(),
+            Event::JobFinished { gen: 1, error: None, notice: Some("sin mejorar".into()) },
+            Instant::now(),
+        );
+        assert_eq!(next.phase, Phase::Idle);
+        assert_eq!(next.gen, 1);
+        assert_eq!(next.started_at_ms, None);
+        assert_eq!(next.pill, Some(PillView::Notice("sin mejorar".into())));
+        assert_eq!(
+            actions,
+            vec![
+                Action::Tray(TrayView::Notice("sin mejorar".into())),
+                Action::SyncPill,
+                Action::Arm { kind: TimerKind::HidePill, gen: 1, after: NOTICE_PILL_SHOWN },
+                Action::Arm { kind: TimerKind::ClearTray, gen: 1, after: NOTICE_TRAY_SHOWN },
+            ]
+        );
+    }
+
+    #[test]
+    fn job_finished_error_wins_over_notice() {
+        let (next, actions) = step(
+            &processing(),
+            Event::JobFinished { gen: 1, error: Some("api".into()), notice: Some("n".into()) },
+            Instant::now(),
+        );
+        assert_eq!(next.pill, Some(PillView::Error("api".into())));
+        assert!(actions.contains(&Action::Tray(TrayView::Error("api".into()))));
+        assert!(!actions.contains(&Action::Tray(TrayView::Notice("n".into()))));
+    }
+
+    #[test]
+    fn notice_timers_hide_the_pill_and_clear_the_tray() {
+        let (shown, _) = step(
+            &processing(),
+            Event::JobFinished { gen: 1, error: None, notice: Some("n".into()) },
+            Instant::now(),
+        );
+        let (hidden, actions) = step(&shown, Event::Timer { kind: TimerKind::HidePill, gen: 1 }, Instant::now());
+        assert_eq!(hidden.pill, None);
+        assert_eq!(actions, vec![Action::SyncPill]);
+
+        let (_, actions) = step(&shown, Event::Timer { kind: TimerKind::ClearTray, gen: 1 }, Instant::now());
+        assert_eq!(actions, vec![Action::Tray(TrayView::Clear)]);
+    }
+
+    #[test]
+    fn stale_notice_job_result_is_dropped() {
+        let (cancelled, _) = step(&processing(), Event::PillCancel, Instant::now());
+        assert_noop(
+            &cancelled,
+            Event::JobFinished { gen: 1, error: None, notice: Some("late".into()) },
+        );
+    }
+
+    #[test]
+    fn notice_pill_is_cleared_by_external_cancel() {
+        let m = Machine {
+            gen: 2,
+            pill: Some(PillView::Notice("n".into())),
+            ..Machine::default()
+        };
+        let (next, actions) = step(&m, Event::ExternalCancel, Instant::now());
+        assert_eq!(next.pill, None);
+        assert_eq!(next.gen, 3);
+        assert_eq!(actions, vec![Action::SyncPill, Action::Tray(TrayView::Clear)]);
+    }
+
+    #[test]
     fn job_finished_outside_processing_is_noop() {
         let t0 = Instant::now();
-        assert_noop(&holding(t0), Event::JobFinished { gen: 1, error: None });
+        assert_noop(&holding(t0), Event::JobFinished { gen: 1, error: None, notice: None });
     }
 
     #[test]
     fn cancelled_job_result_is_dropped() {
         // Cancel during Processing bumps the gen, so the late result is stale.
         let (cancelled, _) = step(&processing(), Event::PillCancel, Instant::now());
-        assert_noop(&cancelled, Event::JobFinished { gen: 1, error: Some("late".into()) });
+        assert_noop(&cancelled, Event::JobFinished { gen: 1, error: Some("late".into()), notice: None });
     }
 
     #[test]
@@ -790,7 +891,7 @@ mod tests {
         let t0 = Instant::now();
         let (done, _) = step(
             &step(&locked(t0), Event::PillAccept, t0).0,
-            Event::JobFinished { gen: 1, error: None },
+            Event::JobFinished { gen: 1, error: None, notice: None },
             t0,
         );
         assert!(done.was_locked, "flag survives until the next session");

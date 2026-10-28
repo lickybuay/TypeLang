@@ -74,17 +74,28 @@ const dict = {
     vocabularySaved: "Vocabulario guardado.",
     dictationRemoteWarning: "Tu voz se enviará a {host}",
     dictationShortcutLabel: "Atajo para dictar sin ventana",
-    dictationOutputLabel: "Al soltar el atajo, pegar",
-    dictationOutputTranslate: "La traducción",
-    dictationOutputOriginal: "El texto original",
+    dictationOutputLabel: "Salida del dictado",
+    dictationOutputTranslate: "Traducir a {target}",
+    dictationOutputKeep: "Mantener {source} (sin traducir)",
+    dictationOutputTranslateHint: "Traduce lo que dijiste al idioma de destino.",
+    dictationOutputKeepHint: "Pega lo que dijiste en {source}, sin traducirlo.",
+    dictationDirectLabel: "Cuando no se traduce",
+    dictationDirectImprove: "Mejorar (limpiar el texto)",
+    dictationDirectOriginal: "Original (transcripción exacta)",
+    dictationDirectImproveHint:
+      "Mantiene tu idioma y tus palabras: solo corrige puntuación y errores de transcripción y quita muletillas.",
+    dictationDirectOriginalHint: "Pega la transcripción tal cual, sin pasar por el modelo.",
     dictationOutputSaved: "Salida de dictado guardada.",
     dictationHotkeyHint:
-      "Mantené presionado el atajo y hablá; al soltarlo se transcribe y se pega donde tengas el cursor, sin abrir el popup. Tocalo dos veces rápido para seguir grabando sin mantenerlo y presionalo de nuevo para terminar. Una píldora flotante muestra el tiempo, con ✓ para terminar y ✕ para descartar. El ícono de la barra de menú muestra el estado: ● grabando, … procesando, ⚠ error.",
+      "Mantené presionado el atajo y hablá; al soltarlo se transcribe y se pega donde tengas el cursor, sin abrir el popup. Tocalo dos veces rápido para seguir grabando sin mantenerlo y presionalo de nuevo para terminar. Una píldora flotante muestra el tiempo, con ✓ para terminar y ✕ para descartar, y una etiqueta para alternar entre traducir y mantener tu idioma. El ícono de la barra de menú muestra el estado: ● grabando, … procesando, ⚠ error.",
     pillStarting: "Preparando el micrófono",
     pillLocked: "Grabación manos libres",
     pillAccept: "Terminar y pegar",
     pillCancel: "Descartar dictado",
     pillHint: "Mantené apretado, o tocá dos veces para seguir grabando",
+    pillChipTranslate: "Traduciendo a {target} — clic para mantener {source}",
+    pillChipKeepImprove: "Manteniendo {source} (mejorado) — clic para traducir",
+    pillChipKeepOriginal: "Manteniendo {source} (original) — clic para traducir",
   },
   en: {
     appTitle: "TypeLang",
@@ -159,17 +170,28 @@ const dict = {
     vocabularySaved: "Vocabulary saved.",
     dictationRemoteWarning: "Your voice will be sent to {host}",
     dictationShortcutLabel: "Shortcut to dictate without a window",
-    dictationOutputLabel: "On release, paste",
-    dictationOutputTranslate: "The translation",
-    dictationOutputOriginal: "The original text",
+    dictationOutputLabel: "Dictation output",
+    dictationOutputTranslate: "Translate to {target}",
+    dictationOutputKeep: "Keep {source} (no translation)",
+    dictationOutputTranslateHint: "Translates what you said into the target language.",
+    dictationOutputKeepHint: "Pastes what you said in {source}, without translating it.",
+    dictationDirectLabel: "When not translating",
+    dictationDirectImprove: "Improve (clean up)",
+    dictationDirectOriginal: "Original (exact transcript)",
+    dictationDirectImproveHint:
+      "Keeps your language and your words: only fixes punctuation and transcription mistakes and drops filler words.",
+    dictationDirectOriginalHint: "Pastes the transcript as is, without going through the model.",
     dictationOutputSaved: "Dictation output saved.",
     dictationHotkeyHint:
-      "Hold the shortcut and speak; on release it is transcribed and pasted at your cursor, without opening the popup. Tap it twice quickly to keep recording without holding it, and press it again to finish. A floating pill shows the time, with ✓ to finish and ✕ to discard. The menu bar icon shows the state: ● recording, … working, ⚠ error.",
+      "Hold the shortcut and speak; on release it is transcribed and pasted at your cursor, without opening the popup. Tap it twice quickly to keep recording without holding it, and press it again to finish. A floating pill shows the time, with ✓ to finish and ✕ to discard, and a chip to switch between translating and keeping your language. The menu bar icon shows the state: ● recording, … working, ⚠ error.",
     pillStarting: "Getting the microphone ready",
     pillLocked: "Hands-free recording",
     pillAccept: "Finish and paste",
     pillCancel: "Discard dictation",
     pillHint: "Hold, or tap twice to keep recording",
+    pillChipTranslate: "Translating to {target} — click to keep {source}",
+    pillChipKeepImprove: "Keeping {source} (improved) — click to translate",
+    pillChipKeepOriginal: "Keeping {source} (original) — click to translate",
   },
 } as const;
 
@@ -194,3 +216,33 @@ export const TRANSLATION_LANGUAGES = [
   "German",
   "Italian",
 ] as const;
+
+// Short codes for the pill's output chip, keyed by the names above.
+const LANGUAGE_CODES: Record<string, string> = {
+  Spanish: "ES",
+  English: "EN",
+  Portuguese: "PT",
+  French: "FR",
+  German: "DE",
+  Italian: "IT",
+};
+
+export function languageCode(name: string): string {
+  return LANGUAGE_CODES[name] ?? name.slice(0, 2).toUpperCase();
+}
+
+// What the hold-to-talk dictation pastes; mirrors `parse_dictation_output` in
+// settings_store.rs. Anything unknown is "translate", as in the backend.
+export type DictationOutput = "translate" | "improve" | "original";
+
+export function parseDictationOutput(value: unknown): DictationOutput {
+  return value === "improve" || value === "original" ? value : "translate";
+}
+
+// What "keep the language" pastes; chosen in Settings only. Mirrors
+// `parse_direct_output`.
+export type DirectOutput = "improve" | "original";
+
+export function parseDirectOutput(value: unknown): DirectOutput {
+  return value === "original" ? "original" : "improve";
+}

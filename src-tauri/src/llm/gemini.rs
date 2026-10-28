@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, PromptOptions, TranslationProvider};
+use super::{system_prompt, user_message, PromptOptions, TranslationProvider, TRUNCATED};
 
 const MODEL: &str = "gemini-2.0-flash";
 
@@ -49,14 +49,21 @@ struct RespPart {
     text: Option<String>,
 }
 
-#[derive(Deserialize)]
+// A reply cut at MAX_TOKENS before any text can come without `parts`; default
+// them so the finish reason below is what gets reported.
+#[derive(Deserialize, Default)]
 struct RespContent {
+    #[serde(default)]
     parts: Vec<RespPart>,
 }
 
 #[derive(Deserialize)]
 struct Candidate {
+    #[serde(default)]
     content: RespContent,
+    // "MAX_TOKENS" means the reply was cut at a token limit.
+    #[serde(default, rename = "finishReason")]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -83,9 +90,11 @@ impl TranslationProvider for GeminiProvider {
         tone: &str,
         opts: &PromptOptions,
     ) -> Result<String, String> {
+        // The key goes in a header, not the query string: reqwest errors
+        // print the URL, which would carry the key into messages shown to the
+        // user.
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={}",
-            self.api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
         );
 
         let body = GenerateRequest {
@@ -97,7 +106,7 @@ impl TranslationProvider for GeminiProvider {
             contents: vec![Content {
                 role: "user",
                 parts: vec![Part {
-                    text: text.to_string(),
+                    text: user_message(text, opts).into_owned(),
                 }],
             }],
             generation_config: GenerationConfig { temperature: 0.3 },
@@ -106,11 +115,12 @@ impl TranslationProvider for GeminiProvider {
         let client = super::http_client()?;
         let response = client
             .post(&url)
+            .header("x-goog-api-key", &self.api_key)
             .header("content-type", "application/json")
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("network error calling Gemini: {e}"))?;
+            .map_err(|e| format!("network error calling Gemini: {}", e.without_url()))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -124,13 +134,21 @@ impl TranslationProvider for GeminiProvider {
         let parsed: GenerateResponse = response
             .json()
             .await
-            .map_err(|e| format!("failed to parse Gemini response: {e}"))?;
+            .map_err(|e| format!("failed to parse Gemini response: {}", e.without_url()))?;
 
-        parsed
+        let candidate = parsed
             .candidates
             .into_iter()
             .next()
-            .and_then(|c| c.content.parts.into_iter().find_map(|p| p.text))
+            .ok_or_else(|| "Gemini response had no text content".to_string())?;
+        if candidate.finish_reason.as_deref() == Some("MAX_TOKENS") {
+            return Err(TRUNCATED.to_string());
+        }
+        candidate
+            .content
+            .parts
+            .into_iter()
+            .find_map(|p| p.text)
             .ok_or_else(|| "Gemini response had no text content".to_string())
     }
 }

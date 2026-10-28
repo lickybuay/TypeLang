@@ -60,6 +60,7 @@ impl From<&PillView> for PillPayload {
             PillView::Processing => ("processing", None, None),
             PillView::Hint => ("hint", None, None),
             PillView::Error(message) => ("error", None, Some(message.clone())),
+            PillView::Notice(message) => ("notice", None, Some(message.clone())),
         };
         PillPayload {
             state,
@@ -161,7 +162,7 @@ fn set_tray(app: &AppHandle, view: &TrayView) {
         }
         TrayView::Recording => tray::set_status(app, Some(RECORDING_STATUS)),
         TrayView::Working => tray::set_status(app, Some(WORKING_STATUS)),
-        TrayView::Error(message) => {
+        TrayView::Error(message) | TrayView::Notice(message) => {
             tray::set_status(app, Some(ERROR_STATUS));
             tray::set_tooltip(app, Some(message));
         }
@@ -290,35 +291,74 @@ fn spawn_job(app: &AppHandle, gen: u64, recapture: bool) {
         .and_then(|mut rt| rt.start.take());
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let result = match start {
+        let result: Result<Option<String>, String> = match start {
             Some(start) => run(&app, gen, start, recapture).await,
             None => Err("No hay una grabación en curso".to_string()),
         };
         if let Err(e) = &result {
             eprintln!("[dictation] {e}");
         }
+        let (error, notice) = match result {
+            Ok(notice) => (None, notice),
+            Err(e) => (Some(e), None),
+        };
+        if let Some(notice) = &notice {
+            eprintln!("[dictation] {notice}");
+        }
         // A superseded job's outcome is ignored by the machine.
-        dispatch(
-            &app,
-            Event::JobFinished {
-                gen,
-                error: result.err(),
-            },
-        );
+        dispatch(&app, Event::JobFinished { gen, error, notice });
     });
+}
+
+/// What to paste for `mode` ("translate", "improve" or "original"), given the
+/// transcript and what the LLM answered (`None` when it was not asked).
+/// The second value is a notice for the user when the result is not what the
+/// mode promises: "improve" never fails the job, it falls back to the
+/// transcript and says so. A failed translation stays an error.
+///
+/// The notice is one of a few fixed texts, never the provider's error: that
+/// text is for the log, and it can carry details that do not belong on screen.
+fn choose_output(
+    mode: &str,
+    transcript: String,
+    llm: Option<Result<String, String>>,
+) -> Result<(String, Option<String>), String> {
+    let unimproved = |transcript: String, reason: &str| {
+        Ok((transcript, Some(format!("Pegado sin mejorar: {reason}"))))
+    };
+    match (mode, llm) {
+        ("original", _) => Ok((transcript, None)),
+        ("improve", Some(Ok(reply))) => match llm::improved_or_none(&transcript, &reply) {
+            Some(text) => Ok((text, None)),
+            None => unimproved(transcript, "la respuesta no parecía una corrección"),
+        },
+        ("improve", Some(Err(e))) if e == llm::TRUNCATED => {
+            unimproved(transcript, "la respuesta se cortó")
+        }
+        ("improve", Some(Err(_)) | None) => unimproved(transcript, "el modelo no respondió"),
+        (_, Some(reply)) => reply.map(|text| (text, None)),
+        (_, None) => Err("El modelo no respondió".to_string()),
+    }
 }
 
 /// With `recapture` (the session was locked) the paste target is whatever app
 /// is in front when the user accepts, not the one captured at the first press:
 /// a locked recording can last minutes, and the user may have moved on. A hold
 /// is over in seconds, so it keeps the captured target and restores it.
-async fn run(app: &AppHandle, id: u64, start: HotkeyStart, recapture: bool) -> Result<(), String> {
+///
+/// `Ok(Some(notice))` means the text was pasted but not as configured.
+async fn run(
+    app: &AppHandle,
+    id: u64,
+    start: HotkeyStart,
+    recapture: bool,
+) -> Result<Option<String>, String> {
     let mut target = start.await.map_err(|e| e.to_string())??;
 
     // A newer session owns the recorder now; stopping it here would steal its
     // audio.
     if !is_current(app, id) {
-        return Ok(());
+        return Ok(None);
     }
     let state = app.state::<AppState>();
     if target.is_none() && !recapture {
@@ -327,7 +367,7 @@ async fn run(app: &AppHandle, id: u64, start: HotkeyStart, recapture: bool) -> R
     }
     let wav = audio::stop(&state).await?;
     if wav.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     if recapture {
         let fresh = tauri::async_runtime::spawn_blocking(focus::capture)
@@ -354,35 +394,59 @@ async fn run(app: &AppHandle, id: u64, start: HotkeyStart, recapture: bool) -> R
     let transcript =
         stt::transcribe(&settings.stt_base_url, wav, &settings.source_lang, &vocabulary).await?;
     if transcript.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
-    let text = if settings.dictation_output == "original" {
-        transcript
+    // An unknown stored value behaves as "translate".
+    let mode = settings_store::parse_dictation_output(&settings.dictation_output)
+        .unwrap_or("translate");
+    let reply = if mode == "original" {
+        None
     } else {
+        // "improve" edits in the spoken language: source as target, and the
+        // tone setting does not apply (see `llm::system_prompt`).
+        let keep_language = mode == "improve";
         let opts = llm::PromptOptions {
             from_voice: true,
             vocabulary,
+            keep_language,
         };
-        let cfg = llm::ProviderConfig {
-            api_key: keychain::get_api_key(&settings.provider)?,
-            provider: settings.provider,
-            base_url: Some(settings.lmstudio_base_url),
-            model: Some(settings.local_model),
+        let target_lang = if keep_language {
+            &settings.source_lang
+        } else {
+            &settings.target_lang
         };
-        llm::translate(
-            &cfg,
-            &transcript,
-            &settings.source_lang,
-            &settings.target_lang,
-            &settings.tone,
-            &opts,
-        )
-        .await?
+        // Built inside the async block: a missing API key must fall back to
+        // the transcript in "improve" mode like any other model failure.
+        let reply = async {
+            let cfg = llm::ProviderConfig {
+                api_key: keychain::get_api_key(&settings.provider)?,
+                provider: settings.provider.clone(),
+                base_url: Some(settings.lmstudio_base_url.clone()),
+                model: Some(settings.local_model.clone()),
+            };
+            llm::translate(
+                &cfg,
+                &transcript,
+                &settings.source_lang,
+                target_lang,
+                &settings.tone,
+                &opts,
+            )
+            .await
+    }
+        .await;
+        // The notice shown to the user is fixed text; the real reason stays
+        // in the log.
+        if let (true, Err(e)) = (keep_language, &reply) {
+            eprintln!("[dictation] improve failed: {e}");
+        }
+        Some(reply)
     };
+    let (text, notice) = choose_output(mode, transcript, reply)?;
     let text = text.trim().to_string();
     if text.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     // Keystroke posting is kept on the main thread, same as the popup flow.
@@ -416,5 +480,92 @@ async fn run(app: &AppHandle, id: u64, start: HotkeyStart, recapture: bool) -> R
         let _ = tx.send(result);
     })
     .map_err(|e| e.to_string())?;
-    rx.await.map_err(|e| e.to_string())?
+    rx.await.map_err(|e| e.to_string())??;
+    Ok(notice)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TRANSCRIPT: &str = "eh o sea mañana llego tarde";
+
+    fn chosen(
+        mode: &str,
+        llm: Option<Result<String, String>>,
+    ) -> Result<(String, Option<String>), String> {
+        choose_output(mode, TRANSCRIPT.to_string(), llm)
+    }
+
+    #[test]
+    fn original_pastes_the_transcript_without_asking_the_model() {
+        assert_eq!(chosen("original", None), Ok((TRANSCRIPT.to_string(), None)));
+        // Even if a reply is there, it is not used.
+        assert_eq!(
+            chosen("original", Some(Ok("other".to_string()))),
+            Ok((TRANSCRIPT.to_string(), None))
+        );
+    }
+
+    #[test]
+    fn translate_pastes_the_reply() {
+        assert_eq!(
+            chosen("translate", Some(Ok("tomorrow I'll be late".to_string()))),
+            Ok(("tomorrow I'll be late".to_string(), None))
+        );
+    }
+
+    #[test]
+    fn translate_error_stays_an_error() {
+        assert_eq!(
+            chosen("translate", Some(Err("boom".to_string()))),
+            Err("boom".to_string())
+        );
+        assert!(chosen("translate", None).is_err());
+    }
+
+    #[test]
+    fn improve_pastes_the_checked_reply() {
+        assert_eq!(
+            chosen("improve", Some(Ok("  Mañana llego tarde.\n".to_string()))),
+            Ok(("Mañana llego tarde.".to_string(), None))
+        );
+    }
+
+    #[test]
+    fn improve_falls_back_on_error_with_a_fixed_notice() {
+        // The provider's text (here with a key-like secret) never reaches the notice.
+        let raw = "network error calling Gemini: https://x/?key=SECRET timed out";
+        let (text, notice) = chosen("improve", Some(Err(raw.to_string()))).unwrap();
+        assert_eq!(text, TRANSCRIPT);
+        assert_eq!(notice.as_deref(), Some("Pegado sin mejorar: el modelo no respondió"));
+    }
+
+    #[test]
+    fn improve_notice_names_a_truncated_reply() {
+        let (text, notice) =
+            chosen("improve", Some(Err(llm::TRUNCATED.to_string()))).unwrap();
+        assert_eq!(text, TRANSCRIPT);
+        assert_eq!(notice.as_deref(), Some("Pegado sin mejorar: la respuesta se cortó"));
+    }
+
+    #[test]
+    fn improve_falls_back_when_the_post_check_rejects_the_reply() {
+        for reply in ["", "   ", "Claro, aquí tienes el texto corregido: Mañana llego tarde."] {
+            let (text, notice) = chosen("improve", Some(Ok(reply.to_string()))).unwrap();
+            assert_eq!(text, TRANSCRIPT, "{reply:?}");
+            assert_eq!(
+                notice.as_deref(),
+                Some("Pegado sin mejorar: la respuesta no parecía una corrección"),
+                "{reply:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn improve_without_a_reply_falls_back() {
+        let (text, notice) = chosen("improve", None).unwrap();
+        assert_eq!(text, TRANSCRIPT);
+        assert_eq!(notice.as_deref(), Some("Pegado sin mejorar: el modelo no respondió"));
+    }
 }

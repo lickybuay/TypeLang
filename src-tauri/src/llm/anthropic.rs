@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, PromptOptions, TranslationProvider};
+use super::{system_prompt, user_message, PromptOptions, TranslationProvider, TRUNCATED};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const MODEL: &str = "claude-haiku-4-5-20251001";
@@ -39,6 +39,10 @@ struct ContentBlock {
 #[derive(Deserialize)]
 struct MessagesResponse {
     content: Vec<ContentBlock>,
+    // "max_tokens" means the reply was cut at our limit: a partial text, not
+    // a finished one.
+    #[serde(default)]
+    stop_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -67,7 +71,7 @@ impl TranslationProvider for AnthropicProvider {
             system: system_prompt(source_lang, target_lang, tone, opts),
             messages: vec![Message {
                 role: "user",
-                content: text.to_string(),
+                content: user_message(text, opts).into_owned(),
             }],
         };
 
@@ -80,7 +84,7 @@ impl TranslationProvider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("network error calling Anthropic: {e}"))?;
+            .map_err(|e| format!("network error calling Anthropic: {}", e.without_url()))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -94,7 +98,11 @@ impl TranslationProvider for AnthropicProvider {
         let parsed: MessagesResponse = response
             .json()
             .await
-            .map_err(|e| format!("failed to parse Anthropic response: {e}"))?;
+            .map_err(|e| format!("failed to parse Anthropic response: {}", e.without_url()))?;
+
+        if parsed.stop_reason.as_deref() == Some("max_tokens") {
+            return Err(TRUNCATED.to_string());
+        }
 
         parsed
             .content

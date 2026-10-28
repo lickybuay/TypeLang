@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -46,12 +49,19 @@ pub struct AppSettings {
     #[serde(default)]
     pub vocabulary: String,
     // Hold-to-talk dictation without the popup (see dictation_hotkey.rs):
-    // its own global shortcut, and whether the transcript is translated
-    // ("translate") or pasted as spoken ("original").
+    // its own global shortcut, and what is pasted: the translation
+    // ("translate"), the transcript cleaned up in its own language
+    // ("improve") or as spoken ("original") — see `parse_dictation_output`.
     #[serde(default = "default_dictation_shortcut")]
     pub dictation_shortcut: String,
     #[serde(default = "default_dictation_output")]
     pub dictation_output: String,
+    // What "keep the language" means when `dictation_output` is not
+    // "translate": "improve" or "original". Chosen in Settings only; the pill
+    // toggles between "translate" and this. Old files without it get it from
+    // `dictation_output` — see `fix_direct_output`.
+    #[serde(default = "default_direct_output")]
+    pub direct_output: String,
 }
 
 impl AppSettings {
@@ -106,6 +116,10 @@ fn default_dictation_output() -> String {
     "translate".to_string()
 }
 
+fn default_direct_output() -> String {
+    "improve".to_string()
+}
+
 // Empty until the user sets one. Expected: a foreground script that starts
 // the local STT/LLM servers and keeps running until killed, which is what
 // lets services.rs stop it by signalling its process group.
@@ -135,6 +149,7 @@ impl Default for AppSettings {
             vocabulary: String::new(),
             dictation_shortcut: default_dictation_shortcut(),
             dictation_output: default_dictation_output(),
+            direct_output: default_direct_output(),
         }
     }
 }
@@ -145,19 +160,104 @@ fn settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join("settings.json"))
 }
 
-pub fn load(app: &AppHandle) -> Result<AppSettings, String> {
-    let path = settings_path(app)?;
+/// Canonical form of a `dictation_output` value ("translate", "improve" or
+/// "original"), or `None` if it is not one. Callers that read a stored value
+/// fall back to "translate".
+pub fn parse_dictation_output(raw: &str) -> Option<&'static str> {
+    ["translate", "improve", "original"].into_iter().find(|o| *o == raw)
+}
+
+/// Canonical form of a `direct_output` value: "improve" or "original".
+pub fn parse_direct_output(raw: &str) -> Option<&'static str> {
+    ["improve", "original"].into_iter().find(|o| *o == raw)
+}
+
+/// The pill chip's toggle: from "translate" (or an unknown stored value,
+/// which counts as it) to the user's `direct` choice, from anything else back
+/// to "translate".
+pub fn toggled_dictation_output(current: &str, direct: &str) -> &'static str {
+    match parse_dictation_output(current) {
+        Some("improve") | Some("original") => "translate",
+        _ => parse_direct_output(direct).unwrap_or("improve"),
+    }
+}
+
+/// Settings' "when not translating" choice. While the dictation is in the
+/// direct mode, the effective output follows it right away.
+pub fn set_direct_output(settings: &mut AppSettings, direct: &str) -> Result<(), String> {
+    let direct = parse_direct_output(direct)
+        .ok_or_else(|| format!("Valor de salida inválido: {direct}"))?;
+    settings.direct_output = direct.to_string();
+    if matches!(parse_dictation_output(&settings.dictation_output), Some("improve" | "original")) {
+        settings.dictation_output = direct.to_string();
+    }
+    Ok(())
+}
+
+/// Files written before `direct_output` existed (or with a bad value) take it
+/// from `dictation_output`, so a user who had "original" keeps it as the direct
+/// choice; anything else defaults to "improve".
+fn fix_direct_output(settings: &mut AppSettings, stored: bool) {
+    if stored && parse_direct_output(&settings.direct_output).is_some() {
+        return;
+    }
+    settings.direct_output = parse_direct_output(&settings.dictation_output)
+        .unwrap_or("improve")
+        .to_string();
+}
+
+fn read_from(path: &Path) -> Result<AppSettings, String> {
     if !path.exists() {
         return Ok(AppSettings::default());
     }
-    let raw = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&raw).map_err(|e| e.to_string())
+    let raw = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let stored = value.get("direct_output").is_some();
+    let mut settings: AppSettings = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    fix_direct_output(&mut settings, stored);
+    Ok(settings)
 }
 
-pub fn save(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
-    let path = settings_path(app)?;
+/// Writes next to the target and renames over it, so a crash or a concurrent
+/// reader never sees a half-written `settings.json`.
+fn write_atomic(path: &Path, settings: &AppSettings) -> Result<(), String> {
     let raw = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    std::fs::write(&path, raw).map_err(|e| e.to_string())
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, raw).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
+pub fn load(app: &AppHandle) -> Result<AppSettings, String> {
+    read_from(&settings_path(app)?)
+}
+
+/// Serializes every read-modify-write of `settings.json`: commands run on
+/// different threads, and two unserialized saves would drop one of the edits.
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn update_at<F>(path: &Path, change: F) -> Result<AppSettings, String>
+where
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
+    // The guarded data is `()`: a panic in an earlier closure leaves nothing
+    // inconsistent, so a poisoned lock is safe to reuse.
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = read_from(path)?;
+    change(&mut settings)?;
+    write_atomic(path, &settings)?;
+    Ok(settings)
+}
+
+/// Loads the settings, applies `change` and persists the result, all under
+/// one lock. If `change` fails nothing is written. Returns what was saved.
+pub fn update<F>(app: &AppHandle, change: F) -> Result<AppSettings, String>
+where
+    F: FnOnce(&mut AppSettings) -> Result<(), String>,
+{
+    update_at(&settings_path(app)?, change)
 }
 
 #[cfg(test)]
@@ -202,5 +302,168 @@ mod tests {
         let back: AppSettings = serde_json::from_str(&raw).unwrap();
         assert!(back.autostart_enabled);
         assert_eq!(back.autostart_command, "zsh ~/custom.sh 8");
+    }
+
+    fn temp_settings_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("typelang-settings-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("settings.json")
+    }
+
+    #[test]
+    fn parse_dictation_output_accepts_the_three_modes() {
+        assert_eq!(parse_dictation_output("translate"), Some("translate"));
+        assert_eq!(parse_dictation_output("improve"), Some("improve"));
+        assert_eq!(parse_dictation_output("original"), Some("original"));
+    }
+
+    #[test]
+    fn parse_dictation_output_rejects_anything_else() {
+        for raw in ["", "Translate", "improved", "raw", " original"] {
+            assert_eq!(parse_dictation_output(raw), None, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn parse_direct_output_accepts_only_improve_and_original() {
+        assert_eq!(parse_direct_output("improve"), Some("improve"));
+        assert_eq!(parse_direct_output("original"), Some("original"));
+        for raw in ["translate", "", "Improve"] {
+            assert_eq!(parse_direct_output(raw), None, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn toggle_goes_between_translate_and_the_direct_choice() {
+        assert_eq!(toggled_dictation_output("translate", "improve"), "improve");
+        assert_eq!(toggled_dictation_output("translate", "original"), "original");
+        assert_eq!(toggled_dictation_output("improve", "improve"), "translate");
+        assert_eq!(toggled_dictation_output("original", "original"), "translate");
+        // Never lands on a third state: the toggle is two-way.
+        assert_eq!(toggled_dictation_output("improve", "original"), "translate");
+        // An unknown stored output counts as "translate"; a bad direct choice
+        // falls back to "improve".
+        assert_eq!(toggled_dictation_output("garbage", "original"), "original");
+        assert_eq!(toggled_dictation_output("translate", "garbage"), "improve");
+    }
+
+    #[test]
+    fn set_direct_output_validates_and_follows_only_in_direct_mode() {
+        let mut s = AppSettings::default();
+        assert!(set_direct_output(&mut s, "translate").is_err());
+        assert!(set_direct_output(&mut s, "x").is_err());
+        assert_eq!(s.direct_output, "improve");
+
+        // Translating: the effective output stays.
+        set_direct_output(&mut s, "original").unwrap();
+        assert_eq!(s.direct_output, "original");
+        assert_eq!(s.dictation_output, "translate");
+
+        // Direct mode: the effective output follows.
+        s.dictation_output = "original".to_string();
+        set_direct_output(&mut s, "improve").unwrap();
+        assert_eq!(s.direct_output, "improve");
+        assert_eq!(s.dictation_output, "improve");
+    }
+
+    fn load_json(raw: &str) -> AppSettings {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = temp_settings_path(&format!("json-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::write(&path, raw).unwrap();
+        read_from(&path).unwrap()
+    }
+
+    #[test]
+    fn old_settings_without_direct_output_derive_it() {
+        assert_eq!(load_json(r#"{"dictation_output":"original"}"#).direct_output, "original");
+        assert_eq!(load_json(r#"{"dictation_output":"improve"}"#).direct_output, "improve");
+        assert_eq!(load_json(r#"{"dictation_output":"translate"}"#).direct_output, "improve");
+        assert_eq!(load_json("{}").direct_output, "improve");
+        // The effective output itself is untouched.
+        assert_eq!(load_json(r#"{"dictation_output":"original"}"#).dictation_output, "original");
+    }
+
+    #[test]
+    fn stored_direct_output_wins_and_a_bad_one_is_derived() {
+        let s = load_json(r#"{"dictation_output":"translate","direct_output":"original"}"#);
+        assert_eq!(s.direct_output, "original");
+        let s = load_json(r#"{"dictation_output":"original","direct_output":"nope"}"#);
+        assert_eq!(s.direct_output, "original");
+    }
+
+    #[test]
+    fn update_persists_and_round_trips() {
+        let path = temp_settings_path("round-trip");
+        let _ = std::fs::remove_file(&path);
+
+        let saved = update_at(&path, |s| {
+            s.dictation_output = "improve".to_string();
+            s.vocabulary = "Welcomy".to_string();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(saved.dictation_output, "improve");
+
+        let loaded = read_from(&path).unwrap();
+        assert_eq!(loaded.dictation_output, "improve");
+        assert_eq!(loaded.vocabulary, "Welcomy");
+        assert_eq!(loaded.provider, AppSettings::default().provider);
+        assert!(!path.with_extension("json.tmp").exists(), "temp file left behind");
+    }
+
+    #[test]
+    fn update_that_fails_writes_nothing() {
+        let path = temp_settings_path("failed");
+        let _ = std::fs::remove_file(&path);
+
+        let result = update_at(&path, |s| {
+            s.tone = "casual".to_string();
+            Err("nope".to_string())
+        });
+        assert_eq!(result.unwrap_err(), "nope");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn concurrent_updates_do_not_lose_edits() {
+        let path = temp_settings_path("concurrent");
+        let _ = std::fs::remove_file(&path);
+
+        let a = path.clone();
+        let b = path.clone();
+        let first = std::thread::spawn(move || {
+            for i in 0..25 {
+                update_at(&a, |s| {
+                    s.vocabulary = format!("v{i}");
+                    Ok(())
+                })
+                .unwrap();
+            }
+        });
+        let second = std::thread::spawn(move || {
+            for i in 0..25 {
+                update_at(&b, |s| {
+                    s.local_model = format!("m{i}");
+                    Ok(())
+                })
+                .unwrap();
+            }
+        });
+        first.join().unwrap();
+        second.join().unwrap();
+
+        let loaded = read_from(&path).unwrap();
+        assert_eq!(loaded.vocabulary, "v24");
+        assert_eq!(loaded.local_model, "m24");
+    }
+
+    #[test]
+    fn stored_output_values_still_load() {
+        for output in ["translate", "improve", "original"] {
+            let raw = format!(r#"{{"dictation_output":"{output}"}}"#);
+            let s: AppSettings = serde_json::from_str(&raw).unwrap();
+            assert_eq!(s.dictation_output, output);
+        }
     }
 }

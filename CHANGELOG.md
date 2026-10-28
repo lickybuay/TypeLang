@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 — 2026-10-28
+
+### New
+
+- **Improve mode for dictation** (Settings → Dictation). Besides translating, the hold-to-talk shortcut can paste your words in the language you spoke: choose "Keep Spanish (no translation)" and then, under "When not translating", **Improve** (punctuation, capitalization and obvious transcription mistakes fixed, filler words and self-corrections dropped, no rephrasing, no translating; questions stay questions and instructions stay instructions) or **Original** (the exact transcript). If the model fails or does not return the edited text, the original transcript is pasted and the pill and the menu-bar icon say so.
+- **Output chip on the recording pill.** A small chip next to the timer shows `ES→EN` while translating and `ES` while keeping your language. Click it to switch between the two, even while recording; Settings follows along. Improve vs Original is chosen in Settings only.
+
+### Fixed
+
+- **Long answers cut by the model's token limit are no longer pasted truncated.** Anthropic, OpenAI and Gemini replies that stopped at their length limit now show an error instead of pasting half the text (the local LLM option already did).
+- **Gemini API key no longer shows up in error messages.** It is now sent in a request header instead of the URL, so a network error can't print it in the pill or the menu-bar tooltip.
+
 ## 0.2.0 — 2026-10-28
 
 ### New

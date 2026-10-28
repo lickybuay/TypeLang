@@ -23,7 +23,7 @@ tauri_nspanel::tauri_panel! {
 }
 
 // The recording pill; the capsule in Pill.tsx fills the window exactly.
-const PILL_WIDTH: f64 = 240.0;
+const PILL_WIDTH: f64 = 300.0;
 const PILL_HEIGHT: f64 = 52.0;
 /// Gap between the pill and the bottom of the monitor's work area (above the
 /// Dock).

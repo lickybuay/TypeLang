@@ -2,6 +2,7 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::{
     audio,
+    commands::settings::emit_output_changed,
     dictation_hotkey::{self, PillPayload},
     settings_store,
     state::AppState,
@@ -83,4 +84,23 @@ pub fn dictation_pill_cancel(window: WebviewWindow) -> Result<(), String> {
 pub fn dictation_pill_state(window: WebviewWindow) -> Result<Option<PillPayload>, String> {
     require_pill(&window)?;
     Ok(dictation_hotkey::pill_state(window.app_handle()))
+}
+
+/// The pill's output chip: toggle between translating and the direct output
+/// chosen in Settings (improved or original; the pill never picks which),
+/// persist it and tell every window. The new value is computed under the
+/// settings lock, so two quick clicks never lose one. Returns the value now in
+/// force.
+#[tauri::command]
+pub fn dictation_pill_toggle_output(window: WebviewWindow) -> Result<String, String> {
+    require_pill(&window)?;
+    let app = window.app_handle();
+    let saved = settings_store::update(app, |s| {
+        s.dictation_output =
+            settings_store::toggled_dictation_output(&s.dictation_output, &s.direct_output)
+                .to_string();
+        Ok(())
+    })?;
+    emit_output_changed(app, &saved.dictation_output);
+    Ok(saved.dictation_output)
 }

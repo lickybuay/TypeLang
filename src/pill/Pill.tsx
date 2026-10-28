@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { t } from "../i18n";
-import type { Lang } from "../i18n";
+import { languageCode, parseDictationOutput, t } from "../i18n";
+import type { DictationOutput, Lang } from "../i18n";
 import "./pill.css";
 
-type PillState = "starting" | "recording" | "locked" | "processing" | "hint" | "error";
+type PillState = "starting" | "recording" | "locked" | "processing" | "hint" | "error" | "notice";
 
 // Mirrors PillPayload in dictation_hotkey.rs.
 type PillPayload = {
@@ -16,6 +16,9 @@ type PillPayload = {
 
 type SettingsView = {
   ui_language: string;
+  source_lang: string;
+  target_lang: string;
+  dictation_output: string;
 };
 
 function formatElapsed(seconds: number) {
@@ -27,16 +30,24 @@ function formatElapsed(seconds: number) {
 function Pill() {
   const [payload, setPayload] = useState<PillPayload | null>(null);
   const [lang, setLang] = useState<Lang>("en");
+  const [output, setOutput] = useState<DictationOutput>("translate");
+  const [sourceLang, setSourceLang] = useState("Spanish");
+  const [targetLang, setTargetLang] = useState("English");
   const [now, setNow] = useState(() => Date.now());
   // A pill-state event that lands before the on-mount query answers is newer
   // than that answer.
   const gotEventRef = useRef(false);
 
-  const loadLang = () => {
+  const loadSettings = () => {
     invoke<SettingsView>("get_settings")
-      .then((s) => setLang(s.ui_language === "es" ? "es" : "en"))
+      .then((s) => {
+        setLang(s.ui_language === "es" ? "es" : "en");
+        setOutput(parseDictationOutput(s.dictation_output));
+        setSourceLang(s.source_lang);
+        setTargetLang(s.target_lang);
+      })
       .catch(() => {
-        // Non-fatal — the pill keeps the last-known/default language.
+        // Non-fatal — the pill keeps the last-known/default values.
       });
   };
 
@@ -45,19 +56,25 @@ function Pill() {
     const unlisten = listen<PillPayload>("pill-state", (event) => {
       gotEventRef.current = true;
       setPayload(event.payload);
-      // The window is reused across sessions: pick up a language change made
-      // in Settings since the last one.
-      if (event.payload.state === "starting") loadLang();
+      // The window is reused across sessions: pick up a language or output
+      // change made in Settings since the last one.
+      if (event.payload.state === "starting") loadSettings();
+    });
+    // The output changed from Settings (or from this chip): no pill re-sync,
+    // just the chip.
+    const unlistenOutput = listen<{ output: string }>("dictation-output-changed", (event) => {
+      setOutput(parseDictationOutput(event.payload.output));
     });
     invoke<PillPayload | null>("dictation_pill_state")
       .then((current) => {
         if (alive && current && !gotEventRef.current) setPayload(current);
       })
       .catch(() => {});
-    loadLang();
+    loadSettings();
     return () => {
       alive = false;
       unlisten.then((f) => f());
+      unlistenOutput.then((f) => f());
     };
   }, []);
 
@@ -73,8 +90,38 @@ function Pill() {
   if (!payload) return null;
 
   const { state } = payload;
-  const hasButtons = state !== "hint" && state !== "error";
+  const hasButtons = state !== "hint" && state !== "error" && state !== "notice";
+  // Two states only: translating, or keeping the spoken language. Whether
+  // keeping means improved or original is a Settings choice.
+  const src = languageCode(sourceLang);
+  const translating = output === "translate";
+  const chipLabel = translating ? `${src}→${languageCode(targetLang)}` : src;
+  const chipTitle = t(
+    lang,
+    translating ? "pillChipTranslate" : output === "improve" ? "pillChipKeepImprove" : "pillChipKeepOriginal",
+  )
+    .replace("{source}", sourceLang)
+    .replace("{target}", targetLang);
   const elapsed = startedAtMs === undefined ? 0 : Math.max(0, Math.floor((now - startedAtMs) / 1000));
+
+  // Rendered only in the starting, recording and locked looks below; the
+  // processing, hint, error and notice looks have no chip.
+  const chip = (
+    <button
+      type="button"
+      className="rec-pill-chip"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() =>
+        invoke<string>("dictation_pill_toggle_output")
+          .then((next) => setOutput(parseDictationOutput(next)))
+          .catch(() => {})
+      }
+      aria-label={chipTitle}
+      title={chipTitle}
+    >
+      {chipLabel}
+    </button>
+  );
 
   return (
     <div className={`rec-pill rec-pill-${state}`}>
@@ -98,6 +145,7 @@ function Pill() {
           <>
             <span className="rec-pill-dot rec-pill-dot-idle" aria-hidden="true" />
             <span className="rec-pill-sr">{t(lang, "pillStarting")}</span>
+            {chip}
           </>
         )}
         {(state === "recording" || state === "locked") && (
@@ -122,6 +170,7 @@ function Pill() {
                 <path d="M8 11V7a4 4 0 0 1 8 0v4" />
               </svg>
             )}
+            {chip}
           </>
         )}
         {state === "processing" && (
@@ -131,6 +180,11 @@ function Pill() {
           </>
         )}
         {state === "hint" && <span className="rec-pill-text rec-pill-text-wrap">{t(lang, "pillHint")}</span>}
+        {state === "notice" && (
+          <span className="rec-pill-text rec-pill-text-wrap rec-pill-text-notice" title={payload.message}>
+            {payload.message}
+          </span>
+        )}
         {state === "error" && (
           <span className="rec-pill-text rec-pill-text-wrap rec-pill-text-error" title={payload.message}>
             {payload.message}

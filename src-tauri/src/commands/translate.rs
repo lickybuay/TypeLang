@@ -89,6 +89,7 @@ pub async fn translate_and_paste(
     let opts = llm::PromptOptions {
         from_voice: from_voice.unwrap_or(false),
         vocabulary: settings.vocabulary_terms(),
+        keep_language: false,
     };
     let api_key = keychain::get_api_key(&settings.provider)?;
     let cfg = llm::ProviderConfig {

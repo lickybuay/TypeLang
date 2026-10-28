@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import ShortcutRecorder from "./ShortcutRecorder";
-import { LANGUAGE_OPTIONS, TRANSLATION_LANGUAGES, t } from "../i18n";
-import type { Lang } from "../i18n";
+import {
+  LANGUAGE_OPTIONS,
+  TRANSLATION_LANGUAGES,
+  parseDictationOutput,
+  parseDirectOutput,
+  t,
+} from "../i18n";
+import type { DictationOutput, DirectOutput, Lang } from "../i18n";
 import "./settings.css";
 
 const PROVIDERS = [
@@ -135,6 +142,7 @@ type SettingsView = {
   snippet_shortcut: string;
   dictation_shortcut: string;
   dictation_output: string;
+  direct_output: string;
   autostart_enabled: boolean;
   autostart_command: string;
   stt_base_url: string;
@@ -178,7 +186,8 @@ function SettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [snippetShortcut, setSnippetShortcut] = useState("Alt+Shift+S");
   const [dictationShortcut, setDictationShortcut] = useState("Alt+Shift+D");
-  const [dictationOutput, setDictationOutput] = useState("translate");
+  const [dictationOutput, setDictationOutput] = useState<DictationOutput>("translate");
+  const [directOutput, setDirectOutput] = useState<DirectOutput>("improve");
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [newSnippetLabel, setNewSnippetLabel] = useState("");
   const [newSnippetText, setNewSnippetText] = useState("");
@@ -203,7 +212,8 @@ function SettingsPage() {
       setTone(s.tone === "casual" ? "casual" : "professional");
       setSnippetShortcut(s.snippet_shortcut);
       setDictationShortcut(s.dictation_shortcut);
-      setDictationOutput(s.dictation_output === "original" ? "original" : "translate");
+      setDictationOutput(parseDictationOutput(s.dictation_output));
+      setDirectOutput(parseDirectOutput(s.direct_output));
       setAutostartEnabled(s.autostart_enabled);
       setAutostartCommand(s.autostart_command);
       setSttUrl(s.stt_base_url);
@@ -218,6 +228,16 @@ function SettingsPage() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The recording pill's chip changes the same setting.
+  useEffect(() => {
+    const unlisten = listen<{ output: string }>("dictation-output-changed", (event) => {
+      setDictationOutput(parseDictationOutput(event.payload.output));
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
   }, []);
 
   const changeUiLanguage = async (next: Lang) => {
@@ -284,12 +304,32 @@ function SettingsPage() {
     }
   };
 
-  const changeDictationOutput = async (next: string) => {
-    setDictationOutput(next);
+  // "translate", or keep the language (which pastes the direct choice).
+  const changeDictationOutput = async (next: "translate" | "direct") => {
+    const previous = dictationOutput;
+    const effective: DictationOutput = next === "translate" ? "translate" : directOutput;
+    setDictationOutput(effective);
     try {
-      await invoke("save_dictation_output", { output: next });
+      await invoke("save_dictation_output", { output: effective });
       setStatus(t(lang, "dictationOutputSaved"));
     } catch (e) {
+      setDictationOutput(previous);
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  // The backend also moves the effective output when it is not "translate".
+  const changeDirectOutput = async (next: DirectOutput) => {
+    const previousDirect = directOutput;
+    const previousOutput = dictationOutput;
+    setDirectOutput(next);
+    if (dictationOutput !== "translate") setDictationOutput(next);
+    try {
+      await invoke("save_direct_output", { output: next });
+      setStatus(t(lang, "dictationOutputSaved"));
+    } catch (e) {
+      setDirectOutput(previousDirect);
+      setDictationOutput(previousOutput);
       setStatus(`Error: ${e}`);
     }
   };
@@ -711,12 +751,30 @@ function SettingsPage() {
           <label className="field-label">{t(lang, "dictationOutputLabel")}</label>
           <select
             className="pill"
-            value={dictationOutput}
-            onChange={(e) => changeDictationOutput(e.target.value)}
+            value={dictationOutput === "translate" ? "translate" : "direct"}
+            onChange={(e) => changeDictationOutput(e.target.value === "translate" ? "translate" : "direct")}
           >
-            <option value="translate">{t(lang, "dictationOutputTranslate")}</option>
-            <option value="original">{t(lang, "dictationOutputOriginal")}</option>
+            <option value="translate">{t(lang, "dictationOutputTranslate").replace("{target}", targetLang)}</option>
+            <option value="direct">{t(lang, "dictationOutputKeep").replace("{source}", sourceLang)}</option>
           </select>
+          <p className="hint">
+            {t(lang, dictationOutput === "translate" ? "dictationOutputTranslateHint" : "dictationOutputKeepHint").replace(
+              "{source}",
+              sourceLang,
+            )}
+          </p>
+          <label className="field-label">{t(lang, "dictationDirectLabel")}</label>
+          <select
+            className="pill"
+            value={directOutput}
+            onChange={(e) => changeDirectOutput(parseDirectOutput(e.target.value))}
+          >
+            <option value="improve">{t(lang, "dictationDirectImprove")}</option>
+            <option value="original">{t(lang, "dictationDirectOriginal")}</option>
+          </select>
+          <p className="hint">
+            {t(lang, directOutput === "improve" ? "dictationDirectImproveHint" : "dictationDirectOriginalHint")}
+          </p>
           <p className="hint">{t(lang, "dictationHotkeyHint")}</p>
           <label className="field-label">{t(lang, "vocabularyLabel")}</label>
           <textarea

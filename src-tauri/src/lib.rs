@@ -96,6 +96,7 @@ pub fn run() {
             commands::settings::save_snippet_shortcut,
             commands::settings::save_dictation_shortcut,
             commands::settings::save_dictation_output,
+            commands::settings::save_direct_output,
             commands::settings::save_autostart,
             commands::settings::save_api_key,
             commands::settings::clear_api_key,
@@ -112,6 +113,7 @@ pub fn run() {
             commands::dictation::dictation_pill_accept,
             commands::dictation::dictation_pill_cancel,
             commands::dictation::dictation_pill_state,
+            commands::dictation::dictation_pill_toggle_output,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

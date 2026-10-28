@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tokio::sync::oneshot;
 
@@ -20,6 +20,7 @@ pub struct SettingsView {
     snippet_shortcut: String,
     dictation_shortcut: String,
     dictation_output: String,
+    direct_output: String,
     autostart_enabled: bool,
     autostart_command: String,
     stt_base_url: String,
@@ -42,7 +43,12 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, String> {
         tone: settings.tone,
         snippet_shortcut: settings.snippet_shortcut,
         dictation_shortcut: settings.dictation_shortcut,
-        dictation_output: settings.dictation_output,
+        // An unknown stored value pastes the translation (see `run()`), so
+        // that is what the UI shows too.
+        dictation_output: settings_store::parse_dictation_output(&settings.dictation_output)
+            .unwrap_or("translate")
+            .to_string(),
+        direct_output: settings.direct_output,
         autostart_enabled: settings.autostart_enabled,
         autostart_command: settings.autostart_command,
         stt_base_url: settings.stt_base_url,
@@ -53,53 +59,65 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, String> {
 
 #[tauri::command]
 pub fn save_provider(app: AppHandle, provider: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.provider = provider;
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.provider = provider;
+        Ok(())
+    })
+    .map(drop)
 }
 
 #[tauri::command]
 pub fn save_lmstudio_base_url(app: AppHandle, url: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.lmstudio_base_url = url.trim().to_string();
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.lmstudio_base_url = url.trim().to_string();
+        Ok(())
+    })
+    .map(drop)
 }
 
 #[tauri::command]
 pub fn save_stt_base_url(app: AppHandle, url: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.stt_base_url = url.trim().to_string();
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.stt_base_url = url.trim().to_string();
+        Ok(())
+    })
+    .map(drop)
 }
 
 #[tauri::command]
 pub fn save_vocabulary(app: AppHandle, vocabulary: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.vocabulary = vocabulary.trim().to_string();
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.vocabulary = vocabulary.trim().to_string();
+        Ok(())
+    })
+    .map(drop)
 }
 
 #[tauri::command]
 pub fn save_local_model(app: AppHandle, model: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.local_model = model.trim().to_string();
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.local_model = model.trim().to_string();
+        Ok(())
+    })
+    .map(drop)
 }
 
 #[tauri::command]
 pub fn save_ui_language(app: AppHandle, language: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.ui_language = language.clone();
-    settings_store::save(&app, &settings)?;
+    settings_store::update(&app, |s| {
+        s.ui_language = language.clone();
+        Ok(())
+    })?;
     tray::update_language(&app, &language);
     Ok(())
 }
 
 #[tauri::command]
 pub fn save_tone(app: AppHandle, tone: String) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.tone = tone.clone();
-    settings_store::save(&app, &settings)?;
+    settings_store::update(&app, |s| {
+        s.tone = tone.clone();
+        Ok(())
+    })?;
     tray::update_tone(&app, &tone);
     Ok(())
 }
@@ -110,10 +128,12 @@ pub fn save_translation_langs(
     source_lang: String,
     target_lang: String,
 ) -> Result<(), String> {
-    let mut settings = settings_store::load(&app)?;
-    settings.source_lang = source_lang;
-    settings.target_lang = target_lang;
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.source_lang = source_lang;
+        s.target_lang = target_lang;
+        Ok(())
+    })
+    .map(drop)
 }
 
 /// Each global shortcut must be unique: one combo can't trigger two actions.
@@ -138,7 +158,7 @@ fn ensure_not_taken(new: &Shortcut, others: [&str; 2]) -> Result<(), String> {
 #[tauri::command]
 pub async fn save_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
     let new_shortcut = Shortcut::from_str(&shortcut).map_err(|e| e.to_string())?;
-    let mut settings = settings_store::load(&app)?;
+    let settings = settings_store::load(&app)?;
     ensure_not_taken(&new_shortcut, [&settings.snippet_shortcut, &settings.dictation_shortcut])?;
     let old_shortcut = Shortcut::from_str(&settings.shortcut).ok();
 
@@ -162,8 +182,11 @@ pub async fn save_shortcut(app: AppHandle, shortcut: String) -> Result<(), Strin
 
     rx.await.map_err(|e| e.to_string())??;
 
-    settings.shortcut = shortcut;
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.shortcut = shortcut;
+        Ok(())
+    })
+    .map(drop)
 }
 
 /// Same unregister-then-register-then-persist flow as `save_shortcut`,
@@ -172,7 +195,7 @@ pub async fn save_shortcut(app: AppHandle, shortcut: String) -> Result<(), Strin
 #[tauri::command]
 pub async fn save_snippet_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
     let new_shortcut = Shortcut::from_str(&shortcut).map_err(|e| e.to_string())?;
-    let mut settings = settings_store::load(&app)?;
+    let settings = settings_store::load(&app)?;
     ensure_not_taken(&new_shortcut, [&settings.shortcut, &settings.dictation_shortcut])?;
     let old_shortcut = Shortcut::from_str(&settings.snippet_shortcut).ok();
 
@@ -194,8 +217,11 @@ pub async fn save_snippet_shortcut(app: AppHandle, shortcut: String) -> Result<(
 
     rx.await.map_err(|e| e.to_string())??;
 
-    settings.snippet_shortcut = shortcut;
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.snippet_shortcut = shortcut;
+        Ok(())
+    })
+    .map(drop)
 }
 
 /// Same flow again for the hold-to-talk dictation shortcut. The old combo may
@@ -204,7 +230,7 @@ pub async fn save_snippet_shortcut(app: AppHandle, shortcut: String) -> Result<(
 #[tauri::command]
 pub async fn save_dictation_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
     let new_shortcut = Shortcut::from_str(&shortcut).map_err(|e| e.to_string())?;
-    let mut settings = settings_store::load(&app)?;
+    let settings = settings_store::load(&app)?;
     ensure_not_taken(&new_shortcut, [&settings.shortcut, &settings.snippet_shortcut])?;
     let old_shortcut = Shortcut::from_str(&settings.dictation_shortcut).ok();
 
@@ -226,19 +252,43 @@ pub async fn save_dictation_shortcut(app: AppHandle, shortcut: String) -> Result
 
     rx.await.map_err(|e| e.to_string())??;
 
-    settings.dictation_shortcut = shortcut;
-    settings_store::save(&app, &settings)
+    settings_store::update(&app, |s| {
+        s.dictation_shortcut = shortcut;
+        Ok(())
+    })
+    .map(drop)
 }
 
-/// "translate" or "original": what the hold-to-talk dictation pastes.
+/// Tells every window (Settings, the recording pill) the dictation output
+/// changed, so whichever one did not make the change can follow it.
+pub fn emit_output_changed(app: &AppHandle, output: &str) {
+    if let Err(e) = app.emit("dictation-output-changed", serde_json::json!({ "output": output })) {
+        eprintln!("[settings] could not announce the dictation output: {e}");
+    }
+}
+
+/// "translate", "improve" or "original": what the hold-to-talk dictation
+/// pastes.
 #[tauri::command]
 pub fn save_dictation_output(app: AppHandle, output: String) -> Result<(), String> {
-    if output != "translate" && output != "original" {
-        return Err(format!("Valor de salida inválido: {output}"));
-    }
-    let mut settings = settings_store::load(&app)?;
-    settings.dictation_output = output;
-    settings_store::save(&app, &settings)
+    let output = settings_store::parse_dictation_output(&output)
+        .ok_or_else(|| format!("Valor de salida inválido: {output}"))?;
+    let saved = settings_store::update(&app, |s| {
+        s.dictation_output = output.to_string();
+        Ok(())
+    })?;
+    emit_output_changed(&app, &saved.dictation_output);
+    Ok(())
+}
+
+/// "improve" or "original": what the dictation pastes when it is not
+/// translating. Chosen here only, never from the pill. While the dictation is
+/// in that direct mode its effective output follows the choice.
+#[tauri::command]
+pub fn save_direct_output(app: AppHandle, output: String) -> Result<(), String> {
+    let saved = settings_store::update(&app, |s| settings_store::set_direct_output(s, &output))?;
+    emit_output_changed(&app, &saved.dictation_output);
+    Ok(())
 }
 
 /// Persists the autostart toggle + command, then applies it right away:
@@ -250,10 +300,11 @@ pub fn save_autostart(app: AppHandle, enabled: bool, command: String) -> Result<
     if enabled && command.is_empty() {
         return Err("El comando no puede estar vacío".to_string());
     }
-    let mut settings = settings_store::load(&app)?;
-    settings.autostart_enabled = enabled;
-    settings.autostart_command = command;
-    settings_store::save(&app, &settings)?;
+    settings_store::update(&app, |s| {
+        s.autostart_enabled = enabled;
+        s.autostart_command = command;
+        Ok(())
+    })?;
     if enabled {
         services::start_if_configured(&app);
     } else {

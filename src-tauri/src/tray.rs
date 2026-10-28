@@ -105,10 +105,10 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 /// rechecks the tray to match — same persisted setting `save_tone` (the
 /// Settings-page command) writes, so either entry point stays in sync.
 fn set_tone(app: &AppHandle, tone: &str) {
-    if let Ok(mut settings) = settings_store::load(app) {
-        settings.tone = tone.to_string();
-        let _ = settings_store::save(app, &settings);
-    }
+    let _ = settings_store::update(app, |s| {
+        s.tone = tone.to_string();
+        Ok(())
+    });
     update_tone(app, tone);
 }
 

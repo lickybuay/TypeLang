@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, PromptOptions, TranslationProvider};
+use super::{system_prompt, user_message, PromptOptions, TranslationProvider, TRUNCATED};
 
 const API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MODEL: &str = "gpt-4o-mini";
@@ -36,6 +36,9 @@ struct ChoiceMessage {
 #[derive(Deserialize)]
 struct Choice {
     message: ChoiceMessage,
+    // "length" means the reply was cut at a token limit.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -72,7 +75,7 @@ impl TranslationProvider for OpenAiProvider {
                 },
                 ChatMessage {
                     role: "user",
-                    content: text.to_string(),
+                    content: user_message(text, opts).into_owned(),
                 },
             ],
         };
@@ -85,7 +88,7 @@ impl TranslationProvider for OpenAiProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("network error calling OpenAI: {e}"))?;
+            .map_err(|e| format!("network error calling OpenAI: {}", e.without_url()))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -99,13 +102,16 @@ impl TranslationProvider for OpenAiProvider {
         let parsed: ChatResponse = response
             .json()
             .await
-            .map_err(|e| format!("failed to parse OpenAI response: {e}"))?;
+            .map_err(|e| format!("failed to parse OpenAI response: {}", e.without_url()))?;
 
-        parsed
+        let choice = parsed
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
-            .ok_or_else(|| "OpenAI response had no choices".to_string())
+            .ok_or_else(|| "OpenAI response had no choices".to_string())?;
+        if choice.finish_reason.as_deref() == Some("length") {
+            return Err(TRUNCATED.to_string());
+        }
+        Ok(choice.message.content)
     }
 }
