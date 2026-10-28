@@ -146,6 +146,23 @@ pub fn hide_snippets(app: &AppHandle) {
     }
 }
 
+/// True on the main thread. The pill's NSPanel may only be touched there; off
+/// it the pill functions do nothing (and say so once) instead of calling into
+/// AppKit.
+#[cfg(target_os = "macos")]
+fn on_main_thread() -> bool {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static WARNED: AtomicBool = AtomicBool::new(false);
+
+    if tauri_nspanel::objc2::MainThreadMarker::new().is_some() {
+        return true;
+    }
+    if !WARNED.swap(true, Ordering::Relaxed) {
+        eprintln!("[window] the recording pill was used off the main thread; ignored");
+    }
+    false
+}
+
 /// Options shared by the macOS panel and the plain window: borderless,
 /// transparent, always on top and never focused.
 fn pill_window_options<'a>(
@@ -172,6 +189,7 @@ fn pill_window_options<'a>(
 /// activating TypeLang, so on macOS it is a non-activating NSPanel that cannot
 /// become key or main, floats at status level on every Space (full-screen
 /// ones included), and is shown and hidden through the panel API only.
+/// Main thread only (a no-op elsewhere on macOS).
 pub fn ensure_pill(app: &AppHandle) -> tauri::Result<()> {
     if app.get_webview_window(PILL_LABEL).is_some() {
         return Ok(());
@@ -181,6 +199,9 @@ pub fn ensure_pill(app: &AppHandle) -> tauri::Result<()> {
     {
         use tauri_nspanel::{CollectionBehavior, PanelBuilder, PanelLevel, StyleMask};
 
+        if !on_main_thread() {
+            return Ok(());
+        }
         PanelBuilder::<_, PillPanel>::new(app, PILL_LABEL)
             .url(WebviewUrl::App("index.html#/pill".into()))
             .level(PanelLevel::Status)
@@ -212,6 +233,10 @@ pub fn ensure_pill(app: &AppHandle) -> tauri::Result<()> {
 /// Moves the pill to the bottom center of the monitor under the cursor and
 /// shows it without focusing it. Main thread only.
 pub fn show_pill(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    if !on_main_thread() {
+        return Ok(());
+    }
     let Some(window) = app.get_webview_window(PILL_LABEL) else {
         return Ok(());
     };
@@ -247,6 +272,9 @@ pub fn hide_pill(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     {
         use tauri_nspanel::ManagerExt;
+        if !on_main_thread() {
+            return;
+        }
         if let Ok(panel) = app.get_webview_panel(PILL_LABEL) {
             panel.hide();
         }
@@ -257,10 +285,14 @@ pub fn hide_pill(app: &AppHandle) {
     }
 }
 
+/// Whether the pill is on screen. Main thread only: false elsewhere on macOS.
 pub fn pill_visible(app: &AppHandle) -> bool {
     #[cfg(target_os = "macos")]
     {
         use tauri_nspanel::ManagerExt;
+        if !on_main_thread() {
+            return false;
+        }
         app.get_webview_panel(PILL_LABEL)
             .is_ok_and(|panel| panel.is_visible())
     }

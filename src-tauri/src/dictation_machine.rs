@@ -313,3 +313,494 @@ pub fn step(m: &Machine, event: Event, now: Instant) -> (Machine, Vec<Action>) {
 
     (next, out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    fn machine(phase: Phase, gen: u64) -> Machine {
+        Machine {
+            phase,
+            gen,
+            ..Machine::default()
+        }
+    }
+
+    /// Idle machine after a press at `t0`, i.e. Holding with gen 1.
+    fn holding(t0: Instant) -> Machine {
+        step(&Machine::default(), Event::Pressed, t0).0
+    }
+
+    /// Machine in PendingDouble after a quick tap, gen 1.
+    fn pending(t0: Instant) -> Machine {
+        step(&holding(t0), Event::Released, t0 + ms(100)).0
+    }
+
+    fn locked(t0: Instant) -> Machine {
+        step(&pending(t0), Event::Pressed, t0 + ms(200)).0
+    }
+
+    fn processing() -> Machine {
+        Machine {
+            phase: Phase::Processing,
+            gen: 1,
+            pill: Some(PillView::Processing),
+            ..Machine::default()
+        }
+    }
+
+    fn hint_idle(gen: u64) -> Machine {
+        Machine {
+            gen,
+            pill: Some(PillView::Hint),
+            ..Machine::default()
+        }
+    }
+
+    fn assert_noop(m: &Machine, event: Event) {
+        let (next, actions) = step(m, event.clone(), Instant::now());
+        assert_eq!(&next, m, "state changed on {event:?}");
+        assert!(actions.is_empty(), "actions on {event:?}: {actions:?}");
+    }
+
+    #[test]
+    fn idle_press_starts_holding() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&Machine::default(), Event::Pressed, t0);
+        assert_eq!(next.phase, Phase::Holding { since: t0 });
+        assert_eq!(next.gen, 1);
+        assert_eq!(
+            actions,
+            vec![Action::Start { gen: 1 }, Action::Tray(TrayView::Recording)]
+        );
+    }
+
+    #[test]
+    fn holding_press_is_key_repeat_and_ignored() {
+        let t0 = Instant::now();
+        let m = holding(t0);
+        let (next, actions) = step(&m, Event::Pressed, t0 + ms(50));
+        assert_eq!(next, m);
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn long_hold_release_accepts_without_recapture() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&holding(t0), Event::Released, t0 + TAP_WINDOW);
+        assert_eq!(next.phase, Phase::Processing);
+        assert_eq!(next.pill, Some(PillView::Processing));
+        assert_eq!(
+            actions,
+            vec![
+                Action::Accept { gen: 1, recapture: false },
+                Action::SyncPill,
+                Action::Tray(TrayView::Working),
+            ]
+        );
+    }
+
+    #[test]
+    fn short_release_arms_tap_timer_from_release() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&holding(t0), Event::Released, t0 + ms(499));
+        assert_eq!(next.phase, Phase::PendingDouble);
+        assert_eq!(next.gen, 1);
+        assert_eq!(
+            actions,
+            vec![Action::Arm {
+                kind: TimerKind::Tap,
+                gen: 1,
+                after: TAP_WINDOW
+            }]
+        );
+    }
+
+    #[test]
+    fn tap_timer_fires_discards_and_shows_hint() {
+        let t0 = Instant::now();
+        let m = pending(t0);
+        let (next, actions) = step(&m, Event::Timer { kind: TimerKind::Tap, gen: 1 }, t0 + ms(600));
+        assert_eq!(next.phase, Phase::Idle);
+        assert_eq!(next.gen, 2);
+        assert_eq!(next.pill, Some(PillView::Hint));
+        assert!(!next.was_locked);
+        assert_eq!(
+            actions,
+            vec![
+                Action::ReleaseRecording,
+                Action::Tray(TrayView::Clear),
+                Action::SyncPill,
+                Action::Arm {
+                    kind: TimerKind::HidePill,
+                    gen: 2,
+                    after: HINT_SHOWN
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn second_press_window_is_measured_from_release() {
+        let t0 = Instant::now();
+        // Released at 490 ms; the second press lands 300 ms later, i.e. 790 ms
+        // after the first press but within the window from the release.
+        let (pend, _) = step(&holding(t0), Event::Released, t0 + ms(490));
+        let (next, _) = step(&pend, Event::Pressed, t0 + ms(790));
+        assert_eq!(next.phase, Phase::Locked);
+        assert!(next.was_locked);
+        assert_eq!(next.gen, 1);
+    }
+
+    #[test]
+    fn locked_release_is_ignored() {
+        let t0 = Instant::now();
+        let m = locked(t0);
+        let (next, actions) = step(&m, Event::Released, t0 + ms(900));
+        assert_eq!(next, m);
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn locked_press_accepts_with_recapture() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&locked(t0), Event::Pressed, t0 + ms(5000));
+        assert_eq!(next.phase, Phase::Processing);
+        assert_eq!(
+            actions,
+            vec![
+                Action::Accept { gen: 1, recapture: true },
+                Action::SyncPill,
+                Action::Tray(TrayView::Working),
+            ]
+        );
+    }
+
+    #[test]
+    fn pending_press_before_audio_keeps_pill_untouched() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&pending(t0), Event::Pressed, t0 + ms(200));
+        assert_eq!(next.phase, Phase::Locked);
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn pending_press_after_audio_shows_locked_pill() {
+        let t0 = Instant::now();
+        let mut m = pending(t0);
+        m.started_at_ms = Some(42);
+        let (next, actions) = step(&m, Event::Pressed, t0 + ms(200));
+        assert_eq!(next.pill, Some(PillView::Locked { started_at_ms: 42 }));
+        assert_eq!(actions, vec![Action::SyncPill]);
+    }
+
+    #[test]
+    fn pill_accept_in_recording_phases_accepts() {
+        let t0 = Instant::now();
+        for (m, recapture) in [
+            (holding(t0), false),
+            (pending(t0), false),
+            (locked(t0), true),
+        ] {
+            let (next, actions) = step(&m, Event::PillAccept, t0 + ms(50));
+            assert_eq!(next.phase, Phase::Processing, "from {:?}", m.phase);
+            assert!(
+                actions.contains(&Action::Accept { gen: 1, recapture }),
+                "from {:?}: {actions:?}",
+                m.phase
+            );
+        }
+    }
+
+    #[test]
+    fn pill_accept_in_processing_and_idle_is_ignored() {
+        assert_noop(&processing(), Event::PillAccept);
+        assert_noop(&Machine::default(), Event::PillAccept);
+    }
+
+    #[test]
+    fn pill_cancel_in_every_non_idle_phase_resets() {
+        let t0 = Instant::now();
+        for m in [holding(t0), pending(t0), locked(t0), processing()] {
+            let (next, actions) = step(&m, Event::PillCancel, t0 + ms(50));
+            assert_eq!(next.phase, Phase::Idle, "from {:?}", m.phase);
+            assert_eq!(next.gen, m.gen + 1);
+            assert_eq!(next.pill, None);
+            assert_eq!(next.started_at_ms, None);
+            assert!(!next.was_locked);
+            assert_eq!(
+                actions,
+                vec![
+                    Action::ReleaseRecording,
+                    Action::SyncPill,
+                    Action::Tray(TrayView::Clear)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn pill_cancel_in_idle_is_noop() {
+        assert_noop(&Machine::default(), Event::PillCancel);
+        assert_noop(&hint_idle(3), Event::PillCancel);
+    }
+
+    #[test]
+    fn external_cancel_hides_lingering_pill_and_bumps_gen() {
+        for pill in [PillView::Hint, PillView::Error("x".into())] {
+            let m = Machine {
+                gen: 4,
+                pill: Some(pill),
+                ..Machine::default()
+            };
+            let (next, actions) = step(&m, Event::ExternalCancel, Instant::now());
+            assert_eq!(next.phase, Phase::Idle);
+            assert_eq!(next.gen, 5);
+            assert_eq!(next.pill, None);
+            assert_eq!(actions, vec![Action::SyncPill, Action::Tray(TrayView::Clear)]);
+        }
+    }
+
+    #[test]
+    fn external_cancel_idle_without_pill_is_noop() {
+        assert_noop(&machine(Phase::Idle, 7), Event::ExternalCancel);
+    }
+
+    #[test]
+    fn external_cancel_while_recording_cancels_session() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&locked(t0), Event::ExternalCancel, t0 + ms(10));
+        assert_eq!(next.phase, Phase::Idle);
+        assert_eq!(next.gen, 2);
+        assert!(actions.contains(&Action::ReleaseRecording));
+    }
+
+    #[test]
+    fn hidden_pill_timer_after_external_cancel_is_stale() {
+        let m = hint_idle(4);
+        let (cancelled, _) = step(&m, Event::ExternalCancel, Instant::now());
+        // The HidePill armed for gen 4 must now do nothing.
+        assert_noop(&cancelled, Event::Timer { kind: TimerKind::HidePill, gen: 4 });
+    }
+
+    #[test]
+    fn stale_generation_events_are_noops() {
+        let t0 = Instant::now();
+        let machines = [
+            holding(t0),
+            pending(t0),
+            locked(t0),
+            processing(),
+            hint_idle(1),
+        ];
+        let old = 0;
+        for m in machines {
+            let events = [
+                Event::Timer { kind: TimerKind::Tap, gen: old },
+                Event::Timer { kind: TimerKind::Cap, gen: old },
+                Event::Timer { kind: TimerKind::HidePill, gen: old },
+                Event::Timer { kind: TimerKind::ClearTray, gen: old },
+                Event::AudioStarted { gen: old, at_ms: 9 },
+                Event::Captured { gen: old },
+                Event::StartFailed { gen: old, message: "boom".into() },
+                Event::JobFinished { gen: old, error: None },
+                Event::JobFinished { gen: old, error: Some("e".into()) },
+            ];
+            for e in events {
+                assert_noop(&m, e);
+            }
+        }
+    }
+
+    #[test]
+    fn cap_timer_accepts_in_holding_and_locked() {
+        let t0 = Instant::now();
+        for (m, recapture) in [(holding(t0), false), (locked(t0), true)] {
+            let (next, actions) = step(
+                &m,
+                Event::Timer { kind: TimerKind::Cap, gen: 1 },
+                t0 + ms(1000),
+            );
+            assert_eq!(next.phase, Phase::Processing);
+            assert!(actions.contains(&Action::Accept { gen: 1, recapture }));
+        }
+    }
+
+    #[test]
+    fn cap_timer_in_pending_and_processing_is_noop() {
+        let t0 = Instant::now();
+        assert_noop(&pending(t0), Event::Timer { kind: TimerKind::Cap, gen: 1 });
+        assert_noop(&processing(), Event::Timer { kind: TimerKind::Cap, gen: 1 });
+    }
+
+    #[test]
+    fn tap_timer_outside_pending_is_noop() {
+        let t0 = Instant::now();
+        assert_noop(&holding(t0), Event::Timer { kind: TimerKind::Tap, gen: 1 });
+        assert_noop(&locked(t0), Event::Timer { kind: TimerKind::Tap, gen: 1 });
+    }
+
+    #[test]
+    fn hide_pill_and_clear_tray_timers_in_idle() {
+        let m = hint_idle(2);
+        let (next, actions) = step(&m, Event::Timer { kind: TimerKind::HidePill, gen: 2 }, Instant::now());
+        assert_eq!(next.pill, None);
+        assert_eq!(actions, vec![Action::SyncPill]);
+
+        let (next, actions) = step(&m, Event::Timer { kind: TimerKind::ClearTray, gen: 2 }, Instant::now());
+        assert_eq!(next, m);
+        assert_eq!(actions, vec![Action::Tray(TrayView::Clear)]);
+    }
+
+    #[test]
+    fn hide_pill_timer_does_not_hide_a_live_session() {
+        let t0 = Instant::now();
+        assert_noop(&holding(t0), Event::Timer { kind: TimerKind::HidePill, gen: 1 });
+    }
+
+    #[test]
+    fn captured_shows_starting_pill_until_audio_opens() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&holding(t0), Event::Captured { gen: 1 }, t0);
+        assert_eq!(next.pill, Some(PillView::Starting));
+        assert_eq!(actions, vec![Action::SyncPill]);
+
+        let mut started = holding(t0);
+        started.started_at_ms = Some(5);
+        assert_noop(&started, Event::Captured { gen: 1 });
+        assert_noop(&processing(), Event::Captured { gen: 1 });
+    }
+
+    #[test]
+    fn audio_started_sets_recording_pill_and_arms_cap() {
+        let t0 = Instant::now();
+        let (next, actions) = step(&holding(t0), Event::AudioStarted { gen: 1, at_ms: 1234 }, t0);
+        assert_eq!(next.started_at_ms, Some(1234));
+        assert_eq!(next.pill, Some(PillView::Recording { started_at_ms: 1234 }));
+        assert_eq!(
+            actions,
+            vec![
+                Action::SyncPill,
+                Action::Arm {
+                    kind: TimerKind::Cap,
+                    gen: 1,
+                    after: Duration::from_secs(HOTKEY_MAX_SECS)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn audio_started_while_locked_uses_locked_look() {
+        let t0 = Instant::now();
+        let (next, _) = step(&locked(t0), Event::AudioStarted { gen: 1, at_ms: 77 }, t0);
+        assert_eq!(next.pill, Some(PillView::Locked { started_at_ms: 77 }));
+    }
+
+    #[test]
+    fn audio_started_in_processing_or_idle_is_noop() {
+        assert_noop(&processing(), Event::AudioStarted { gen: 1, at_ms: 1 });
+        assert_noop(&machine(Phase::Idle, 1), Event::AudioStarted { gen: 1, at_ms: 1 });
+    }
+
+    #[test]
+    fn start_failed_goes_idle_with_error_pill() {
+        let t0 = Instant::now();
+        let (next, actions) = step(
+            &holding(t0),
+            Event::StartFailed { gen: 1, message: "no mic".into() },
+            t0,
+        );
+        assert_eq!(next.phase, Phase::Idle);
+        assert_eq!(next.gen, 2);
+        assert_eq!(next.pill, Some(PillView::Error("no mic".into())));
+        assert_eq!(
+            actions,
+            vec![
+                Action::ReleaseRecording,
+                Action::Tray(TrayView::Error("no mic".into())),
+                Action::SyncPill,
+                Action::Arm { kind: TimerKind::HidePill, gen: 2, after: ERROR_PILL_SHOWN },
+                Action::Arm { kind: TimerKind::ClearTray, gen: 2, after: ERROR_TRAY_SHOWN },
+            ]
+        );
+    }
+
+    #[test]
+    fn start_failed_while_processing_is_noop() {
+        assert_noop(
+            &processing(),
+            Event::StartFailed { gen: 1, message: "x".into() },
+        );
+    }
+
+    #[test]
+    fn job_finished_ok_returns_to_idle_and_hides_pill() {
+        let (next, actions) = step(
+            &processing(),
+            Event::JobFinished { gen: 1, error: None },
+            Instant::now(),
+        );
+        assert_eq!(next.phase, Phase::Idle);
+        assert_eq!(next.pill, None);
+        assert_eq!(next.started_at_ms, None);
+        assert_eq!(actions, vec![Action::SyncPill, Action::Tray(TrayView::Clear)]);
+    }
+
+    #[test]
+    fn job_finished_err_shows_error_pill_and_arms_timers() {
+        let (next, actions) = step(
+            &processing(),
+            Event::JobFinished { gen: 1, error: Some("api".into()) },
+            Instant::now(),
+        );
+        assert_eq!(next.phase, Phase::Idle);
+        assert_eq!(next.gen, 1);
+        assert_eq!(next.pill, Some(PillView::Error("api".into())));
+        assert_eq!(
+            actions,
+            vec![
+                Action::Tray(TrayView::Error("api".into())),
+                Action::SyncPill,
+                Action::Arm { kind: TimerKind::HidePill, gen: 1, after: ERROR_PILL_SHOWN },
+                Action::Arm { kind: TimerKind::ClearTray, gen: 1, after: ERROR_TRAY_SHOWN },
+            ]
+        );
+    }
+
+    #[test]
+    fn job_finished_outside_processing_is_noop() {
+        let t0 = Instant::now();
+        assert_noop(&holding(t0), Event::JobFinished { gen: 1, error: None });
+    }
+
+    #[test]
+    fn cancelled_job_result_is_dropped() {
+        // Cancel during Processing bumps the gen, so the late result is stale.
+        let (cancelled, _) = step(&processing(), Event::PillCancel, Instant::now());
+        assert_noop(&cancelled, Event::JobFinished { gen: 1, error: Some("late".into()) });
+    }
+
+    #[test]
+    fn new_session_from_idle_resets_was_locked() {
+        let t0 = Instant::now();
+        let (done, _) = step(
+            &step(&locked(t0), Event::PillAccept, t0).0,
+            Event::JobFinished { gen: 1, error: None },
+            t0,
+        );
+        assert!(done.was_locked, "flag survives until the next session");
+        let (next, _) = step(&done, Event::Pressed, t0 + ms(10));
+        assert!(!next.was_locked);
+        assert_eq!(next.started_at_ms, None);
+        assert_eq!(next.gen, 2);
+
+        // The new hold-release must not recapture.
+        let (_, actions) = step(&next, Event::Released, t0 + ms(10) + TAP_WINDOW);
+        assert!(actions.contains(&Action::Accept { gen: 2, recapture: false }));
+    }
+}

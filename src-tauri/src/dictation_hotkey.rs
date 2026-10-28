@@ -336,8 +336,12 @@ async fn run(app: &AppHandle, id: u64, start: HotkeyStart, recapture: bool) -> R
             .and_then(Result::ok);
         // TypeLang in front says nothing about where the user was (the pill
         // should not activate it, but if it ever does): keep the app captured
-        // at the start, with its restore path, instead of failing.
-        if !fresh.as_ref().is_some_and(FocusedApp::is_self) {
+        // at the start, with its restore path, instead of failing. The one
+        // exception is Settings being focused: that is a real target, and
+        // the self-target rules below copy the text for it.
+        let stray_self = fresh.as_ref().is_some_and(FocusedApp::is_self)
+            && !window::settings_focused(app);
+        if !stray_self {
             target = fresh;
         }
     }
