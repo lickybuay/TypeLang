@@ -106,11 +106,11 @@ fn default_dictation_output() -> String {
     "translate".to_string()
 }
 
-// Foreground script that starts whisper (:8178) and llama-server (:8091) and
-// keeps running until killed, which is what lets services.rs stop it by
-// signalling its process group.
+// Empty until the user sets one. Expected: a foreground script that starts
+// the local STT/LLM servers and keeps running until killed, which is what
+// lets services.rs stop it by signalling its process group.
 fn default_autostart_command() -> String {
-    "zsh ~/UTILS/local_llm.sh 4".to_string()
+    String::new()
 }
 
 fn default_stt_base_url() -> String {
@@ -164,7 +164,7 @@ pub fn save(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const DEFAULT_COMMAND: &str = "zsh ~/UTILS/local_llm.sh 4";
+    const DEFAULT_COMMAND: &str = "";
 
     #[test]
     fn default_has_autostart_off_and_default_command() {

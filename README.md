@@ -110,6 +110,8 @@ By default the app is ad-hoc signed, and macOS ties Accessibility, Microphone an
    APPLE_SIGNING_IDENTITY="TypeLang Local Signing" npm run tauri build
    ```
 
+Signing with a real identity also turns on macOS's hardened runtime, which blocks the microphone unless the app declares it. `src-tauri/Entitlements.plist` (`com.apple.security.device.audio-input`) does that; keep it if you change the bundle config, or dictation will record silence.
+
 This only helps on your own Mac; anyone else running the app still sees the "unidentified developer" warning.
 
 ### Tests
