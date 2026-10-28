@@ -19,6 +19,7 @@ use crate::{
 const RECORDING_STATUS: &str = "●";
 const WORKING_STATUS: &str = "…";
 const ERROR_STATUS: &str = "⚠";
+const NO_TARGET_STATUS: &str = "No había una app donde pegar";
 const ERROR_SHOWN: Duration = Duration::from_secs(4);
 /// A job busy for longer than the recorder's own cap plus its grace period
 /// lost its release (e.g. the shortcut was swallowed): treat it as stale.
@@ -202,9 +203,23 @@ async fn run(app: &AppHandle, id: u64, start: HotkeyStart) -> Result<(), String>
             if !is_current(&app_for_main, id) {
                 return Ok(());
             }
-            let still_front = focus::capture().map(|f| f.is_same(&target));
-            if still_front != Ok(true) {
-                focus::restore(&target)?;
+            if target.is_self() {
+                // Never restore ourselves: TypeLang can only be the target
+                // when its Settings window is the one in front. And never
+                // simulate a keystroke at ourselves either: it would only be
+                // processed after this thread has restored the old clipboard,
+                // so the text is left on the clipboard for the user to paste.
+                if !window::settings_focused(&app_for_main) {
+                    return Err(NO_TARGET_STATUS.to_string());
+                }
+                return arboard::Clipboard::new()
+                    .and_then(|mut clipboard| clipboard.set_text(&text))
+                    .map_err(|e| e.to_string());
+            } else {
+                let still_front = focus::capture().map(|f| f.is_same(&target));
+                if still_front != Ok(true) {
+                    focus::restore(&target)?;
+                }
             }
             paste::paste_text(&text)
         })();

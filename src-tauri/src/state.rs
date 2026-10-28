@@ -28,12 +28,23 @@ pub struct TrayToneItems {
 /// frontmost, or why the microphone did not open.
 pub type HotkeyStart = tauri::async_runtime::JoinHandle<Result<Option<FocusedApp>, String>>;
 
-/// Shared app state. Holds the app that had focus right before the popup
-/// opened, so the translate command knows where to paste once the user
+/// Where the translation gets pasted once the user submits.
+#[derive(Debug, Clone)]
+pub enum CapturedTarget {
+    /// Another app, with the moment it was captured so a stale one can be
+    /// dropped (see `shortcut::next_target`).
+    App { app: FocusedApp, at: Instant },
+    /// The shortcut fired while TypeLang's own Settings window had focus: it
+    /// is focused natively and pasted into, never through an Apple Event.
+    SelfSettings,
+}
+
+/// Shared app state. Holds the target that was in front right before the
+/// popup opened, so the translate command knows where to paste once the user
 /// submits.
 #[derive(Default)]
 pub struct AppState {
-    pub captured_focus: Mutex<Option<FocusedApp>>,
+    pub captured_focus: Mutex<Option<CapturedTarget>>,
     pub tray_items: Mutex<Option<TrayMenuItems>>,
     pub tray_tone_items: Mutex<Option<TrayToneItems>>,
     /// Process-group id of the local-services command TypeLang spawned (see

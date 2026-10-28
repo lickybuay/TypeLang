@@ -2,7 +2,7 @@ use tauri::{AppHandle, State};
 use tokio::sync::oneshot;
 
 use crate::{
-    focus, paste,
+    commands::translate::paste_to_target,
     snippets_store::{self, Snippet},
     state::AppState,
     window,
@@ -57,23 +57,12 @@ pub async fn paste_snippet(
     state: State<'_, AppState>,
     text: String,
 ) -> Result<(), String> {
-    let captured = state
-        .captured_focus
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
-        .ok_or_else(|| "No se capturó la app original".to_string())?;
+    let captured = state.captured_focus.lock().map_err(|e| e.to_string())?.clone();
 
     let (tx, rx) = oneshot::channel();
     let app_for_main = app.clone();
     app.run_on_main_thread(move || {
-        let result = (|| -> Result<(), String> {
-            window::hide_snippets(&app_for_main);
-            focus::restore(&captured)?;
-            paste::paste_text(&text)?;
-            Ok(())
-        })();
-        let _ = tx.send(result);
+        let _ = tx.send(paste_to_target(&app_for_main, captured, &text, window::hide_snippets));
     })
     .map_err(|e| e.to_string())?;
 
@@ -83,4 +72,5 @@ pub async fn paste_snippet(
 #[tauri::command]
 pub fn cancel_snippets(app: AppHandle) {
     window::hide_snippets(&app);
+    window::release_activation(&app);
 }

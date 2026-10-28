@@ -129,3 +129,32 @@ pub fn show_settings(app: &AppHandle) {
         let _ = window.set_focus();
     }
 }
+
+fn is_visible(window: &WebviewWindow) -> bool {
+    matches!(window.is_visible(), Ok(true))
+}
+
+pub fn settings_visible(app: &AppHandle) -> bool {
+    app.get_webview_window(SETTINGS_LABEL)
+        .is_some_and(|w| is_visible(&w))
+}
+
+pub fn settings_focused(app: &AppHandle) -> bool {
+    app.get_webview_window(SETTINGS_LABEL)
+        .is_some_and(|w| is_visible(&w) && matches!(w.is_focused(), Ok(true)))
+}
+
+/// After the popup/snippets window is dismissed with Escape, TypeLang (an
+/// accessory app) can stay the active app and swallow the next shortcut.
+/// Hiding the app hands activation back to the previous one. Skipped while
+/// Settings is open, and never used on blur-hide (another app already took
+/// focus there).
+pub fn release_activation(app: &AppHandle) {
+    if settings_visible(app) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    if let Err(e) = app.hide() {
+        eprintln!("[window] failed to hide app: {e}");
+    }
+}

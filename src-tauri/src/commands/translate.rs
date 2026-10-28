@@ -1,7 +1,11 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::oneshot;
 
-use crate::{focus, keychain, llm, paste, settings_store, snippets_store, state::AppState, window};
+use crate::{
+    focus, keychain, llm, paste, settings_store, snippets_store,
+    state::{AppState, CapturedTarget},
+    window,
+};
 
 // Keeps the snippets picker's list readable — long labels just wrap/clip
 // there anyway, so there's no value in keeping the full text.
@@ -17,6 +21,50 @@ fn auto_label(text: &str) -> String {
     let truncated: String = text.chars().take(AUTO_LABEL_MAX_CHARS).collect();
     let trimmed = truncated.rsplit_once(' ').map_or(truncated.as_str(), |(head, _)| head);
     format!("{trimmed}…")
+}
+
+const NO_TARGET_MESSAGE: &str =
+    "No había una app donde pegar; la traducción quedó en el portapapeles.";
+
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.set_text(text))
+        .map_err(|e| e.to_string())
+}
+
+/// Hides the popup/snippets window with `hide`, brings the captured target to
+/// the front and pastes `text` there. Must run on the main thread. With no
+/// usable target (none captured, or the captured app has since quit) nothing
+/// is hidden or pasted: the text is left on the clipboard and the error tells
+/// the user so. When the target is TypeLang's own Settings window no
+/// keystroke is simulated: this thread is also the one that would have to
+/// process it, so the paste would run before the keystroke and restore the
+/// old clipboard. Settings is focused and the text is left on the clipboard
+/// for the user to paste with Cmd+V.
+pub(crate) fn paste_to_target(
+    app: &AppHandle,
+    target: Option<CapturedTarget>,
+    text: &str,
+    hide: fn(&AppHandle),
+) -> Result<(), String> {
+    match target {
+        Some(CapturedTarget::App { app: target_app, .. }) if target_app.is_alive() => {
+            hide(app);
+            focus::restore(&target_app)?;
+            paste::paste_text(text)
+        }
+        Some(CapturedTarget::SelfSettings) if window::settings_visible(app) => {
+            hide(app);
+            if let Some(settings) = app.get_webview_window(window::SETTINGS_LABEL) {
+                let _ = settings.set_focus();
+            }
+            copy_to_clipboard(text)
+        }
+        _ => {
+            copy_to_clipboard(text)?;
+            Err(NO_TARGET_MESSAGE.to_string())
+        }
+    }
 }
 
 /// Called by the popup on submit. Translates the input, then hides the
@@ -60,12 +108,7 @@ pub async fn translate_and_paste(
         .trim()
         .to_string();
 
-    let captured = state
-        .captured_focus
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
-        .ok_or_else(|| "No se capturó la app original".to_string())?;
+    let captured = state.captured_focus.lock().map_err(|e| e.to_string())?.clone();
 
     // CoreGraphics keystroke posting is kept on the main thread, which
     // AppKit-backed APIs can assert on. Async commands run on a tokio worker
@@ -77,12 +120,7 @@ pub async fn translate_and_paste(
     let (tx, rx) = oneshot::channel();
     let app_for_main = app.clone();
     app.run_on_main_thread(move || {
-        let result = (|| -> Result<(), String> {
-            window::hide_popup(&app_for_main);
-            focus::restore(&captured)?;
-            paste::paste_text(&text_for_paste)?;
-            Ok(())
-        })();
+        let result = paste_to_target(&app_for_main, captured, &text_for_paste, window::hide_popup);
         let _ = tx.send(result);
     })
     .map_err(|e| e.to_string())?;
@@ -102,6 +140,7 @@ pub async fn translate_and_paste(
 #[tauri::command]
 pub fn cancel_popup(app: AppHandle) {
     window::hide_popup(&app);
+    window::release_activation(&app);
 }
 
 #[tauri::command]
