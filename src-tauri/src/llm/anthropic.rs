@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, TranslationProvider};
+use super::{system_prompt, PromptOptions, TranslationProvider};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const MODEL: &str = "claude-haiku-4-5-20251001";
@@ -58,19 +58,20 @@ impl TranslationProvider for AnthropicProvider {
         source_lang: &str,
         target_lang: &str,
         tone: &str,
+        opts: &PromptOptions,
     ) -> Result<String, String> {
         let body = MessagesRequest {
             model: MODEL,
             max_tokens: 1024,
             temperature: 0.3,
-            system: system_prompt(source_lang, target_lang, tone),
+            system: system_prompt(source_lang, target_lang, tone, opts),
             messages: vec![Message {
                 role: "user",
                 content: text.to_string(),
             }],
         };
 
-        let client = reqwest::Client::new();
+        let client = super::http_client()?;
         let response = client
             .post(API_URL)
             .header("x-api-key", &self.api_key)

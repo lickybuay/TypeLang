@@ -249,6 +249,103 @@
   }
 }
 
+/* Same footprint as the settings gear when idle; grows to fit the elapsed
+   time while recording. */
+.popup-mic-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.popup-mic-button:hover:not(:disabled) {
+  background: #f0f0f0;
+  color: #555;
+}
+
+.popup-mic-button:disabled {
+  cursor: default;
+}
+
+.popup-mic-button.recording {
+  background: rgba(229, 57, 53, 0.14);
+  color: #d32f2f;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.popup-mic-button.recording:hover {
+  background: rgba(229, 57, 53, 0.22);
+  color: #d32f2f;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(229, 57, 53, 0);
+  }
+}
+
+.popup-mic-spinner {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: mic-spin 0.8s linear infinite;
+}
+
+@keyframes mic-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .popup-mic-button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e2e2e5;
+  }
+
+  .popup-mic-button.recording {
+    background: rgba(255, 107, 107, 0.18);
+    color: #ff6b6b;
+  }
+
+  .popup-mic-button.recording:hover {
+    background: rgba(255, 107, 107, 0.26);
+    color: #ff6b6b;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-mic-button {
+    transition: none;
+  }
+
+  .popup-mic-button.recording,
+  .popup-mic-spinner {
+    animation: none;
+  }
+}
+
 /* Compound selector (higher specificity than the bare .pill rule in
    theme.css) so this reliably wins regardless of CSS load order. The
    translate field is a solid recessed input, not one of the glass fields

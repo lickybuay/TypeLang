@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, TranslationProvider};
+use super::{system_prompt, PromptOptions, TranslationProvider};
 
 const API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MODEL: &str = "gpt-4o-mini";
@@ -60,6 +60,7 @@ impl TranslationProvider for OpenAiProvider {
         source_lang: &str,
         target_lang: &str,
         tone: &str,
+        opts: &PromptOptions,
     ) -> Result<String, String> {
         let body = ChatRequest {
             model: MODEL,
@@ -67,7 +68,7 @@ impl TranslationProvider for OpenAiProvider {
             messages: vec![
                 ChatMessage {
                     role: "system",
-                    content: system_prompt(source_lang, target_lang, tone),
+                    content: system_prompt(source_lang, target_lang, tone, opts),
                 },
                 ChatMessage {
                     role: "user",
@@ -76,7 +77,7 @@ impl TranslationProvider for OpenAiProvider {
             ],
         };
 
-        let client = reqwest::Client::new();
+        let client = super::http_client()?;
         let response = client
             .post(API_URL)
             .header("Authorization", format!("Bearer {}", self.api_key))

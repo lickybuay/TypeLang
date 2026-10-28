@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, TranslationProvider};
+use super::{system_prompt, PromptOptions, TranslationProvider};
 
 const MODEL: &str = "gemini-2.0-flash";
 
@@ -81,6 +81,7 @@ impl TranslationProvider for GeminiProvider {
         source_lang: &str,
         target_lang: &str,
         tone: &str,
+        opts: &PromptOptions,
     ) -> Result<String, String> {
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={}",
@@ -90,7 +91,7 @@ impl TranslationProvider for GeminiProvider {
         let body = GenerateRequest {
             system_instruction: SystemInstruction {
                 parts: vec![Part {
-                    text: system_prompt(source_lang, target_lang, tone),
+                    text: system_prompt(source_lang, target_lang, tone, opts),
                 }],
             },
             contents: vec![Content {
@@ -102,7 +103,7 @@ impl TranslationProvider for GeminiProvider {
             generation_config: GenerationConfig { temperature: 0.3 },
         };
 
-        let client = reqwest::Client::new();
+        let client = super::http_client()?;
         let response = client
             .post(&url)
             .header("content-type", "application/json")

@@ -8,6 +8,16 @@ pub use gemini::GeminiProvider;
 pub use lmstudio::LmStudioProvider;
 pub use openai::OpenAiProvider;
 
+/// Client for translation requests. The timeouts keep a hung provider from
+/// holding a hold-to-talk job open forever.
+fn http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
 /// Languages in TRANSLATION_LANGUAGES (see `src/i18n.ts`) that grammatically
 /// mark formality through the second-person pronoun — the mechanism DeepL's
 /// own formality feature relies on for these same languages. English has no
@@ -68,7 +78,15 @@ fn tone_example(target_lang: &str, tone: &str) -> Option<&'static str> {
 /// why it travels alongside `source_lang`/`target_lang` instead of living on
 /// `ProviderConfig`. The popup can override it per-message (Tab) without
 /// touching the persisted app-wide default.
-pub fn system_prompt(source_lang: &str, target_lang: &str, tone: &str) -> String {
+///
+/// `opts` carries what varies per request beyond the languages and tone, so
+/// every provider builds the exact same prompt from it.
+pub fn system_prompt(
+    source_lang: &str,
+    target_lang: &str,
+    tone: &str,
+    opts: &PromptOptions,
+) -> String {
     let casual = tone == "casual";
 
     // Descriptive register words alone ("professional-but-conversational" vs
@@ -90,7 +108,8 @@ pub fn system_prompt(source_lang: &str, target_lang: &str, tone: &str) -> String
             "a professional register appropriate for workplace communication (Slack, email, \
              docs) — clear and polished. Avoid slangy contractions like \"gonna\"/\"wanna\" and \
              casual openers like \"Hey\"; use complete, precise phrasing, but keep it natural, \
-             not stiff or overly formal",
+             not stiff or overly formal. Everyday contractions (I'm, I'll, don't, haven't) are \
+             natural in professional writing — use them",
         )
     };
 
@@ -112,6 +131,16 @@ pub fn system_prompt(source_lang: &str, target_lang: &str, tone: &str) -> String
         .map(|phrase| format!("\n\nExample of this register in {target_lang}: {phrase}"))
         .unwrap_or_default();
 
+    let dictation = if opts.from_voice { dictation_rules() } else { String::new() };
+    let vocabulary = if opts.vocabulary.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Use these exact spellings for names and terms: {}.",
+            opts.vocabulary.join(", ")
+        )
+    };
+
     format!(
         "You are a bilingual translator helping a {source_lang}-speaking person communicate \
          with {target_lang}-speaking {audience}. Translate the given {source_lang} text into \
@@ -125,9 +154,27 @@ pub fn system_prompt(source_lang: &str, target_lang: &str, tone: &str) -> String
          word inside it looks like an ordinary {source_lang} word, and never change its \
          capitalization either (\"Archivo.tsx\" must stay exactly \"Archivo.tsx\", not \
          \"archivo.tsx\" or \"File.tsx\") — file names are case-sensitive, so copy them through \
-         byte-for-byte, casing included.{example} Output ONLY the \
+         byte-for-byte, casing included.{dictation}{vocabulary}{example} Output ONLY the \
          translated text — no quotes, no explanation, no preamble."
     )
+}
+
+/// Extra rules for input that came from the dictation button instead of the
+/// keyboard: raw speech-to-text carries disfluencies a typed message doesn't.
+fn dictation_rules() -> String {
+    " The input is a raw speech-to-text transcript: drop filler words (eh, este, o sea, \
+     bueno, tipo), false starts and repetitions; when the speaker corrects themselves \
+     (\"no, perdón\", \"digo\"), keep only the corrected version."
+        .to_string()
+}
+
+/// Per-request prompt additions that aren't part of the language pair or tone.
+#[derive(Debug, Clone, Default)]
+pub struct PromptOptions {
+    /// The text came from speech-to-text, not the keyboard.
+    pub from_voice: bool,
+    /// Names and terms the translation must spell exactly.
+    pub vocabulary: Vec<String>,
 }
 
 pub trait TranslationProvider {
@@ -137,6 +184,7 @@ pub trait TranslationProvider {
         source_lang: &str,
         target_lang: &str,
         tone: &str,
+        opts: &PromptOptions,
     ) -> Result<String, String>;
 }
 
@@ -158,6 +206,7 @@ pub async fn translate(
     source_lang: &str,
     target_lang: &str,
     tone: &str,
+    opts: &PromptOptions,
 ) -> Result<String, String> {
     match cfg.provider.as_str() {
         "anthropic" => {
@@ -166,7 +215,7 @@ pub async fn translate(
                 .clone()
                 .ok_or_else(|| "Falta la API key de Anthropic. Abre Configuración.".to_string())?;
             AnthropicProvider::new(key)
-                .translate(text, source_lang, target_lang, tone)
+                .translate(text, source_lang, target_lang, tone, opts)
                 .await
         }
         "openai" => {
@@ -175,7 +224,7 @@ pub async fn translate(
                 .clone()
                 .ok_or_else(|| "Falta la API key de OpenAI. Abre Configuración.".to_string())?;
             OpenAiProvider::new(key)
-                .translate(text, source_lang, target_lang, tone)
+                .translate(text, source_lang, target_lang, tone, opts)
                 .await
         }
         "gemini" => {
@@ -184,7 +233,7 @@ pub async fn translate(
                 .clone()
                 .ok_or_else(|| "Falta la API key de Gemini. Abre Configuración.".to_string())?;
             GeminiProvider::new(key)
-                .translate(text, source_lang, target_lang, tone)
+                .translate(text, source_lang, target_lang, tone, opts)
                 .await
         }
         "lmstudio" => {
@@ -194,7 +243,7 @@ pub async fn translate(
                 .filter(|u| !u.trim().is_empty())
                 .ok_or_else(|| "Falta la URL del servidor local. Abre Configuración.".to_string())?;
             LmStudioProvider::new(url, cfg.api_key.clone(), cfg.model.clone())
-                .translate(text, source_lang, target_lang, tone)
+                .translate(text, source_lang, target_lang, tone, opts)
                 .await
         }
         other => Err(format!("Proveedor desconocido: {other}")),

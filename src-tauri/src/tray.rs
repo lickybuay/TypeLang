@@ -30,6 +30,8 @@ fn tone_labels(ui_language: &str) -> (&'static str, &'static str) {
     }
 }
 
+const TRAY_ID: &str = "main";
+
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     let settings = settings_store::load(app).unwrap_or_default();
     let (translate_label, settings_label, quit_label, tone_menu_label) =
@@ -82,7 +84,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         });
     }
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -142,5 +144,19 @@ pub fn update_tone(app: &AppHandle, tone: &str) {
             let _ = items.professional.set_checked(!is_casual);
             let _ = items.casual.set_checked(is_casual);
         }
+    }
+}
+
+/// Shows `status` as text next to the menu bar icon (macOS), or clears it with
+/// `None`. Used by the hold-to-talk dictation to show recording/working/error.
+pub fn set_status(app: &AppHandle, status: Option<&str>) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_title(status);
+    }
+}
+
+pub fn set_tooltip(app: &AppHandle, tooltip: Option<&str>) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(tooltip);
     }
 }

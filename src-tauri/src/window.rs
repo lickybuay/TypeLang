@@ -1,3 +1,4 @@
+use crate::{audio, state::AppState};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
@@ -5,6 +6,7 @@ use tauri::{
 
 pub const POPUP_LABEL: &str = "popup";
 pub const SETTINGS_LABEL: &str = "main";
+pub const SNIPPETS_LABEL: &str = "snippets";
 
 /// Shows the floating translate popup, creating it on first use. Reused on
 /// subsequent shortcut presses instead of rebuilt, and reset via a JS event
@@ -35,6 +37,8 @@ pub fn show_popup(app: &AppHandle) -> tauri::Result<()> {
     let hide_on_blur = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Focused(false) = event {
+            // The mic must not stay open behind a hidden window.
+            audio::cancel(&hide_on_blur.app_handle().state::<AppState>());
             let _ = hide_on_blur.hide();
         }
     });
@@ -69,6 +73,52 @@ fn center_on_active_monitor(app: &AppHandle, window: &WebviewWindow) {
 
 pub fn hide_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+/// Same reuse/reset/reposition pattern as `show_popup` — a second small
+/// floating window, this one listing saved snippets instead of taking new
+/// text to translate.
+pub fn show_snippets(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(SNIPPETS_LABEL) {
+        center_on_active_monitor(app, &window);
+        window.show()?;
+        window.set_focus()?;
+        window.emit("snippets-reset", ())?;
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        SNIPPETS_LABEL,
+        WebviewUrl::App("index.html#/snippets".into()),
+    )
+    .title("TypeLang")
+    .inner_size(320.0, 360.0)
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .visible(true)
+    .build()?;
+
+    let hide_on_blur = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Focused(false) = event {
+            let _ = hide_on_blur.hide();
+        }
+    });
+
+    center_on_active_monitor(app, &window);
+    window.set_focus()?;
+    Ok(())
+}
+
+pub fn hide_snippets(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(SNIPPETS_LABEL) {
         let _ = window.hide();
     }
 }

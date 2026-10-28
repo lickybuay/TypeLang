@@ -65,6 +65,46 @@ function IconServer() {
   );
 }
 
+function IconSnippets() {
+  return (
+    <svg {...iconProps}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M8 13h8M8 17h5" />
+    </svg>
+  );
+}
+
+function IconPower() {
+  return (
+    <svg {...iconProps}>
+      <path d="M12 2v10" />
+      <path d="M18.4 6.6a9 9 0 1 1-12.8 0" />
+    </svg>
+  );
+}
+
+function IconMic() {
+  return (
+    <svg {...iconProps}>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v4" />
+    </svg>
+  );
+}
+
+function IconTrash({ size = 14 }: { size?: number }) {
+  const trashProps = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  return (
+    <svg {...trashProps}>
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    </svg>
+  );
+}
+
 // Show/hide toggle for the API key field — the one field on this page that
 // actually hides its value (type="password"), so a reveal affordance has
 // real use, unlike Server URL/Model which are already plain text.
@@ -92,8 +132,36 @@ type SettingsView = {
   target_lang: string;
   shortcut: string;
   tone: string;
+  snippet_shortcut: string;
+  dictation_shortcut: string;
+  dictation_output: string;
+  autostart_enabled: boolean;
+  autostart_command: string;
+  stt_base_url: string;
+  vocabulary: string;
   has_api_key: boolean;
 };
+
+type Snippet = {
+  id: string;
+  label: string;
+  text: string;
+};
+
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]", "::1"];
+
+// Host of the dictation URL when it points off this machine, else null. An
+// empty or unparseable value is left alone (the default is loopback).
+function remoteHost(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  try {
+    const { hostname } = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`);
+    return LOOPBACK_HOSTS.includes(hostname) ? null : hostname;
+  } catch {
+    return null;
+  }
+}
 
 function SettingsPage() {
   const [lang, setLang] = useState<Lang>("en");
@@ -108,10 +176,23 @@ function SettingsPage() {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
+  const [snippetShortcut, setSnippetShortcut] = useState("Alt+Shift+S");
+  const [dictationShortcut, setDictationShortcut] = useState("Alt+Shift+D");
+  const [dictationOutput, setDictationOutput] = useState("translate");
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [newSnippetLabel, setNewSnippetLabel] = useState("");
+  const [newSnippetText, setNewSnippetText] = useState("");
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartCommand, setAutostartCommand] = useState("");
+  const [sttUrl, setSttUrl] = useState("");
+  const [vocabulary, setVocabulary] = useState("");
 
   const refresh = async () => {
     try {
-      const s = await invoke<SettingsView>("get_settings");
+      const [s, snippetList] = await Promise.all([
+        invoke<SettingsView>("get_settings"),
+        invoke<Snippet[]>("get_snippets"),
+      ]);
       setProvider(s.provider);
       setBaseUrl(s.lmstudio_base_url);
       setLocalModel(s.local_model);
@@ -120,7 +201,15 @@ function SettingsPage() {
       setTargetLang(s.target_lang);
       setShortcut(s.shortcut);
       setTone(s.tone === "casual" ? "casual" : "professional");
+      setSnippetShortcut(s.snippet_shortcut);
+      setDictationShortcut(s.dictation_shortcut);
+      setDictationOutput(s.dictation_output === "original" ? "original" : "translate");
+      setAutostartEnabled(s.autostart_enabled);
+      setAutostartCommand(s.autostart_command);
+      setSttUrl(s.stt_base_url);
+      setVocabulary(s.vocabulary);
       setHasKey(s.has_api_key);
+      setSnippets(snippetList);
     } catch (e) {
       setStatus(`${t(lang, "settingsReadError")}: ${e}`);
     }
@@ -166,10 +255,84 @@ function SettingsPage() {
   };
 
   const saveShortcut = async (next: string) => {
-    setShortcut(next);
     try {
       await invoke("save_shortcut", { shortcut: next });
+      setShortcut(next);
       setStatus(t(lang, "shortcutSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const saveSnippetShortcut = async (next: string) => {
+    try {
+      await invoke("save_snippet_shortcut", { shortcut: next });
+      setSnippetShortcut(next);
+      setStatus(t(lang, "shortcutSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const saveDictationShortcut = async (next: string) => {
+    try {
+      await invoke("save_dictation_shortcut", { shortcut: next });
+      setDictationShortcut(next);
+      setStatus(t(lang, "shortcutSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const changeDictationOutput = async (next: string) => {
+    setDictationOutput(next);
+    try {
+      await invoke("save_dictation_output", { output: next });
+      setStatus(t(lang, "dictationOutputSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const updateLocalSnippet = (id: string, patch: Partial<Snippet>) => {
+    setSnippets((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
+
+  // Auto-save on blur, same pattern as the rest of this page — `snippets`
+  // here is the current render's state, already updated by onChange, so
+  // this always persists what's actually on screen.
+  const persistSnippet = async (id: string) => {
+    const snippet = snippets.find((s) => s.id === id);
+    if (!snippet || !snippet.label.trim() || !snippet.text.trim()) return;
+    try {
+      await invoke("update_snippet", { id, label: snippet.label, text: snippet.text });
+      setStatus(t(lang, "snippetUpdated"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const deleteSnippetRow = async (id: string) => {
+    setSnippets((prev) => prev.filter((s) => s.id !== id));
+    try {
+      await invoke("delete_snippet", { id });
+      setStatus(t(lang, "snippetDeleted"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const addSnippetRow = async () => {
+    if (!newSnippetLabel.trim() || !newSnippetText.trim()) return;
+    try {
+      const created = await invoke<Snippet>("save_snippet", {
+        label: newSnippetLabel,
+        text: newSnippetText,
+      });
+      setSnippets((prev) => [...prev, created]);
+      setNewSnippetLabel("");
+      setNewSnippetText("");
+      setStatus(t(lang, "snippetSaved"));
     } catch (e) {
       setStatus(`Error: ${e}`);
     }
@@ -231,6 +394,37 @@ function SettingsPage() {
     try {
       await invoke("save_local_model", { model: localModel });
       setStatus(t(lang, "modelSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const saveSttUrl = async () => {
+    try {
+      await invoke("save_stt_base_url", { url: sttUrl });
+      setStatus(t(lang, "urlSaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  const saveVocabulary = async () => {
+    try {
+      await invoke("save_vocabulary", { vocabulary });
+      setStatus(t(lang, "vocabularySaved"));
+    } catch (e) {
+      setStatus(`Error: ${e}`);
+    }
+  };
+
+  // Unlike the blur-saved fields above, this applies immediately (starts or
+  // stops the services), so the command gets an explicit Save button and the
+  // checkbox saves with whatever command is currently in the field.
+  const saveAutostart = async (enabled: boolean) => {
+    try {
+      await invoke("save_autostart", { enabled, command: autostartCommand });
+      setAutostartEnabled(enabled);
+      setStatus(t(lang, "autostartSaved"));
     } catch (e) {
       setStatus(`Error: ${e}`);
     }
@@ -420,6 +614,153 @@ function SettingsPage() {
               </button>
             </div>
           )}
+        </section>
+
+        <section className="card-section">
+          <h2>
+            <IconSnippets />
+            {t(lang, "snippetsSection")}
+          </h2>
+          <label className="field-label">{t(lang, "snippetShortcutLabel")}</label>
+          <ShortcutRecorder lang={lang} value={snippetShortcut} onSave={saveSnippetShortcut} />
+          <p className="hint">{t(lang, "snippetsHint")}</p>
+
+          {snippets.length === 0 ? (
+            <p className="hint">{t(lang, "snippetsEmptyList")}</p>
+          ) : (
+            <div className="snippet-list">
+              {snippets.map((s) => (
+                <div className="snippet-row" key={s.id}>
+                  <div className="snippet-row-top">
+                    <input
+                      className="pill pill-mono snippet-label-input"
+                      value={s.label}
+                      onChange={(e) => updateLocalSnippet(s.id, { label: e.target.value })}
+                      onBlur={() => persistSnippet(s.id)}
+                      placeholder={t(lang, "snippetLabelPlaceholder")}
+                    />
+                    <button
+                      type="button"
+                      className="snippet-delete-button"
+                      onClick={() => deleteSnippetRow(s.id)}
+                      aria-label={t(lang, "delete")}
+                    >
+                      <IconTrash />
+                    </button>
+                  </div>
+                  <textarea
+                    className="pill snippet-text-input"
+                    value={s.text}
+                    onChange={(e) => updateLocalSnippet(s.id, { text: e.target.value })}
+                    onBlur={() => persistSnippet(s.id)}
+                    placeholder={t(lang, "snippetTextPlaceholder")}
+                    rows={2}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="snippet-row snippet-row-new">
+            <input
+              className="pill pill-mono"
+              value={newSnippetLabel}
+              onChange={(e) => setNewSnippetLabel(e.target.value)}
+              placeholder={t(lang, "snippetLabelPlaceholder")}
+            />
+            <textarea
+              className="pill"
+              value={newSnippetText}
+              onChange={(e) => setNewSnippetText(e.target.value)}
+              placeholder={t(lang, "snippetTextPlaceholder")}
+              rows={2}
+            />
+            <button
+              type="button"
+              className="pill pill-button pill-button-secondary"
+              onClick={addSnippetRow}
+              disabled={!newSnippetLabel.trim() || !newSnippetText.trim()}
+            >
+              {t(lang, "addSnippet")}
+            </button>
+          </div>
+        </section>
+
+        <section className="card-section">
+          <h2>
+            <IconMic />
+            {t(lang, "dictationSection")}
+          </h2>
+          <label className="field-label">{t(lang, "dictationUrlLabel")}</label>
+          <input
+            className="pill pill-mono"
+            type="text"
+            placeholder="http://127.0.0.1:8178/v1"
+            value={sttUrl}
+            onChange={(e) => setSttUrl(e.target.value)}
+            onBlur={saveSttUrl}
+          />
+          {remoteHost(sttUrl) && (
+            <p className="hint hint-warn">
+              {t(lang, "dictationRemoteWarning").replace("{host}", remoteHost(sttUrl) ?? "")}
+            </p>
+          )}
+          <p className="hint">{t(lang, "dictationHint")}</p>
+          <label className="field-label">{t(lang, "dictationShortcutLabel")}</label>
+          <ShortcutRecorder lang={lang} value={dictationShortcut} onSave={saveDictationShortcut} />
+          <label className="field-label">{t(lang, "dictationOutputLabel")}</label>
+          <select
+            className="pill"
+            value={dictationOutput}
+            onChange={(e) => changeDictationOutput(e.target.value)}
+          >
+            <option value="translate">{t(lang, "dictationOutputTranslate")}</option>
+            <option value="original">{t(lang, "dictationOutputOriginal")}</option>
+          </select>
+          <p className="hint">{t(lang, "dictationHotkeyHint")}</p>
+          <label className="field-label">{t(lang, "vocabularyLabel")}</label>
+          <textarea
+            className="pill pill-mono vocabulary-input"
+            value={vocabulary}
+            onChange={(e) => setVocabulary(e.target.value)}
+            onBlur={saveVocabulary}
+            placeholder={t(lang, "vocabularyPlaceholder")}
+            rows={3}
+          />
+          <p className="hint">{t(lang, "vocabularyHint")}</p>
+        </section>
+
+        <section className="card-section">
+          <h2>
+            <IconPower />
+            {t(lang, "autostartSection")}
+          </h2>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={autostartEnabled}
+              onChange={(e) => saveAutostart(e.target.checked)}
+            />
+            <span>{t(lang, "autostartLabel")}</span>
+          </label>
+          <label className="field-label">{t(lang, "autostartCommandLabel")}</label>
+          <input
+            className="pill pill-mono"
+            type="text"
+            placeholder="zsh ~/UTILS/local_llm.sh 4"
+            value={autostartCommand}
+            onChange={(e) => setAutostartCommand(e.target.value)}
+          />
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="pill pill-button pill-button-secondary"
+              onClick={() => saveAutostart(autostartEnabled)}
+            >
+              {t(lang, "save")}
+            </button>
+          </div>
+          <p className="hint">{t(lang, "autostartHint")}</p>
         </section>
         </div>
       </main>

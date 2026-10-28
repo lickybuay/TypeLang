@@ -176,6 +176,80 @@ select.header-lang-toggle {
   }
 }
 
+.snippet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.snippet-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snippet-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snippet-label-input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.snippet-text-input {
+  margin-bottom: 0;
+  resize: vertical;
+  font-size: 13px;
+}
+
+.vocabulary-input {
+  resize: vertical;
+  font-size: 13px;
+}
+
+.snippet-delete-button {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.06);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.snippet-delete-button:hover {
+  background: #fbe4e1;
+  color: #b23434;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snippet-delete-button {
+    transition: none;
+  }
+}
+
+/* The "add new" row lives inside the same list visually but is never
+   empty/deletable like a real snippet — a top border separates it instead
+   of blending into the saved ones above. */
+.snippet-row-new {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(17, 17, 17, 0.08);
+}
+
+.snippet-row-new .pill-button {
+  margin-top: 4px;
+}
+
 .field-label-row {
   display: flex;
   align-items: center;
@@ -187,10 +261,23 @@ select.header-lang-toggle {
   margin: 0;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .hint {
   font-size: 11px;
   color: var(--muted);
   margin: 8px 0 0;
+}
+
+.hint-warn {
+  color: #b23434;
+  font-weight: 600;
 }
 
 .lang-pair {

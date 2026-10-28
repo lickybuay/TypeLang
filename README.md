@@ -10,12 +10,19 @@ Press a global keyboard shortcut, a small floating window appears wherever your 
 
 ## Why
 
-Non-literal translation. If you speak, say, Spanish and work with English-speaking colleagues, tools like Google Translate produce stiff, word-for-word English. TypeLang sends your text to an LLM (Claude, GPT, Gemini, or a local model via LM Studio) with a prompt tuned for natural, idiomatic, professional phrasing — the way a fluent bilingual coworker would actually write it.
+Non-literal translation. If you speak, say, Spanish and work with English-speaking colleagues, tools like Google Translate produce stiff, word-for-word English. TypeLang sends your text to an LLM (Claude, GPT, Gemini, or a local model through any OpenAI-compatible server such as LM Studio or llama.cpp) with a prompt tuned for natural, idiomatic, professional phrasing — the way a fluent bilingual coworker would actually write it.
+
+You can also **speak** instead of type: dictate in your language and get polished English pasted where your cursor is — like Wispr Flow, but running entirely on your own machine if you want it to.
 
 ## Features
 
 - **Global shortcut, configurable** — record any key combination in Settings; defaults to something unlikely to collide with your browser's shortcuts.
-- **Bring your own API key (BYOK)** — plug in Anthropic, OpenAI, Google Gemini, or point it at a local [LM Studio](https://lmstudio.ai) server. No account, no subscription, no data going through a third-party server you don't control.
+- **Bring your own API key (BYOK)** — plug in Anthropic, OpenAI, Google Gemini, or point it at any local OpenAI-compatible server ([LM Studio](https://lmstudio.ai), [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`, …). No account, no subscription, no data going through a third-party server you don't control.
+- **Voice dictation** — click the 🎤 in the popup, speak, click again: the transcript appears in the popup so you can review it, then Enter translates it. Filler words ("eh", "o sea"…) and self-corrections ("el martes, no perdón, el miércoles") are cleaned up in the translation.
+- **Hold-to-talk shortcut** — hold the dictation shortcut (default `Alt+Shift+D`), speak, release: the result is pasted straight at your cursor, no popup. Choose in Settings whether it pastes the translation or your original words. The menu-bar icon shows `●` while recording, `…` while processing and `⚠` on errors (hover it for details).
+- **Custom vocabulary** — product names, people, jargon: listed once in Settings, spelled right in both the transcript and the translation.
+- **Snippets** — press ⌘Enter instead of Enter to save a translation as a snippet; a second shortcut (default `Alt+Shift+S`) opens a searchable picker to paste it again without re-translating.
+- **Start local services automatically** — optionally run a command when TypeLang opens (e.g. a script that starts your local speech-to-text and LLM servers) and stop it when TypeLang quits. If the services are already running, TypeLang leaves them alone.
 - **Configurable translation direction** — pick source/target languages from Settings, not hardcoded to one pair.
 - **Bilingual interface** — Spanish and English UI, switchable in Settings.
 - **Auto-paste, not copy-paste** — the translation lands directly in the field you were typing in, with your original clipboard contents restored afterward.
@@ -50,6 +57,29 @@ Applies whether you're running the built `.app` or `npm run tauri dev` — the a
 2. **Configure a provider:** click the menu-bar icon → **Configuración/Settings** → pick a provider (Anthropic, OpenAI, Google Gemini, or LM Studio) → paste in an API key (LM Studio doesn't need one — just its server URL, e.g. `http://localhost:1234/v1`) → save.
 3. **Optional settings:** interface language, translation direction (which language you type in → which it translates to), and the global keyboard shortcut — click the shortcut field and press a new combination to change it.
 4. **Translate:** place your cursor in any text field, press the shortcut (default `Alt+Shift+T`), type in your source language, press **Enter**. The popup closes and the translation is pasted automatically where your cursor was. Press **Escape** to cancel without pasting anything. The ⚙️ icon in the popup jumps straight to Settings.
+5. **Dictate:** in the popup, click 🎤, speak, click 🎤 again — review the transcript and press Enter. Or hold the dictation shortcut (default `Alt+Shift+D`) anywhere, speak, and release. The first time, macOS asks for **Microphone** permission; the permission dialog takes focus and closes the popup, so just reopen it and try again. Escape cancels a recording in the popup; recordings stop on their own after 2 minutes.
+
+### Running everything locally
+
+Dictation needs a speech-to-text server with an OpenAI-compatible `/v1/audio/transcriptions` endpoint (Settings → Dictation, default `http://127.0.0.1:8178/v1`); translation needs an LLM server (Settings → provider "LM Studio", any OpenAI-compatible URL). A setup that works well on Apple Silicon:
+
+```sh
+# Speech-to-text: whisper.cpp (brew install whisper-cpp ffmpeg)
+# Run it from a writable directory — --convert writes a temporary file there.
+cd ~/Library/Caches && whisper-server \
+  -m ggml-large-v3-turbo-q5_0.bin -l es \
+  --host 127.0.0.1 --port 8178 \
+  --inference-path /v1/audio/transcriptions --convert
+
+# Translation: llama.cpp with Gemma 4 E4B (Q4_K_M, ~5 GB), thinking disabled
+llama-server -m gemma-4-E4B-it-Q4_K_M.gguf --alias gemma-4-e4b \
+  --host 127.0.0.1 --port 8091 --jinja -ngl 99 -c 4096 \
+  --chat-template-kwargs '{"enable_thinking":false}'
+```
+
+Then in Settings use `http://127.0.0.1:8091/v1` with model `gemma-4-e4b`. Thinking must be off on the server: TypeLang doesn't send reasoning flags, and a thinking model can spend its whole budget reasoning and return an empty answer. On an M4 Max this gives ~0.5 s transcription and ~0.3 s translation per sentence, and Gemma 4 E4B handled the tricky cases in our tests (who-does-what pronouns, mid-sentence self-corrections) better than other small models we tried.
+
+To have TypeLang start these for you, put the commands in a script and set it under Settings → Local services. If you point the dictation URL at another machine, Settings warns you that your voice will be sent there.
 
 ## Development
 
@@ -70,9 +100,28 @@ npm run tauri build
 
 The built app lands at `src-tauri/target/release/bundle/macos/TypeLang.app`.
 
+### Keeping permissions across rebuilds (local signing)
+
+By default the app is ad-hoc signed, and macOS ties Accessibility, Microphone and Local Network permissions to the exact build — so every rebuild asks for them again. Signing with a self-signed certificate makes macOS recognise TypeLang by its bundle id + your certificate instead, and the permissions stick:
+
+1. Keychain Access → Certificate Assistant → **Create a Certificate…** → name it e.g. `TypeLang Local Signing`, Identity Type **Self Signed Root**, Certificate Type **Code Signing**.
+2. Build with that identity (no config change needed):
+   ```sh
+   APPLE_SIGNING_IDENTITY="TypeLang Local Signing" npm run tauri build
+   ```
+
+This only helps on your own Mac; anyone else running the app still sees the "unidentified developer" warning.
+
+### Tests
+
+```sh
+cd src-tauri && cargo test
+```
+
 ## How it works
 
-- **Rust/Tauri backend** — registers the global shortcut, captures whichever app has focus, shows a floating popup window, calls the configured LLM provider, then restores focus and simulates a paste keystroke via [`enigo`](https://github.com/enigo-rs/enigo).
+- **Rust/Tauri backend** — registers the global shortcuts, captures whichever app has focus (by bundle id), shows a floating popup window, calls the configured LLM provider, then restores focus and pastes. The paste is a single CoreGraphics ⌘V event with the Command flag set on the event itself, posted only after you've released your modifier keys — so it can't arrive as a bare "v". If TypeLang can't get back to the original app, it shows an error instead of pasting somewhere else, and it only restores your previous clipboard if nothing else was copied in the meantime.
+- **Dictation** — the microphone is captured in Rust ([`cpal`](https://github.com/RustAudio/cpal)) on a dedicated thread, encoded as WAV in memory ([`hound`](https://github.com/ruuda/hound)) and sent to the speech-to-text server; nothing is written to disk or logged. Recordings are capped at 2 minutes and cancelled whenever the popup closes.
 - **React/TypeScript frontend** — the Settings window and the floating translate popup, both built from the same Vite bundle and routed by URL hash.
 - API keys live in the OS keychain (via the [`keyring`](https://github.com/hwchen/keyring-rs) crate), never in plain-text config.
 

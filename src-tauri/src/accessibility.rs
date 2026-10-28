@@ -1,9 +1,9 @@
 //! Accessibility (AX) permission check + prompt for macOS.
 //!
-//! `enigo`'s CGEventPost-based keystroke simulation doesn't error when the
-//! process lacks Accessibility trust — the event is posted but the OS just
-//! drops it, so `paste::paste_text` was returning `Ok(())` on every call
-//! even when nothing actually got typed. Checking trust explicitly (and
+//! CoreGraphics keystroke posting doesn't error when the process lacks
+//! Accessibility trust — the event is posted but the OS just drops it, so
+//! `paste::paste_text` was returning `Ok(())` on every call even when
+//! nothing actually got typed. Checking trust explicitly (and
 //! prompting for it) is what turns that into a real signal instead of a
 //! silent no-op.
 

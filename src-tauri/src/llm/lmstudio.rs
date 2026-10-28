@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{system_prompt, TranslationProvider};
+use super::{system_prompt, PromptOptions, TranslationProvider};
 
 /// Local LLM servers (LM Studio, Ollama, llama.cpp's server, etc.) that
 /// speak the OpenAI-compatible `/v1/chat/completions` shape. No real API
@@ -101,6 +101,7 @@ impl TranslationProvider for LmStudioProvider {
         source_lang: &str,
         target_lang: &str,
         tone: &str,
+        opts: &PromptOptions,
     ) -> Result<String, String> {
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -111,7 +112,7 @@ impl TranslationProvider for LmStudioProvider {
             messages: vec![
                 ChatMessage {
                     role: "system",
-                    content: system_prompt(source_lang, target_lang, tone),
+                    content: system_prompt(source_lang, target_lang, tone, opts),
                 },
                 ChatMessage {
                     role: "user",
@@ -130,7 +131,7 @@ impl TranslationProvider for LmStudioProvider {
             .filter(|k| !k.trim().is_empty())
             .unwrap_or("not-needed");
 
-        let client = reqwest::Client::new();
+        let client = super::http_client()?;
         let request = client
             .post(&url)
             .header("content-type", "application/json")
