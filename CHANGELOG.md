@@ -17,6 +17,8 @@
 - **Paste landing in the wrong app.** TypeLang now returns to the original app by its bundle id and checks it's in front; if it can't, it shows an error instead of pasting somewhere else.
 - **Clipboard.** Your previous clipboard is restored only if nothing else was copied meanwhile, and an image on the clipboard is no longer wiped.
 - Requests to the LLM time out after 60 s instead of hanging.
+- **Popup stuck on "Translating…".** Pressing the shortcut while TypeLang itself was in front (popup already open, or right after Escape) made it try to switch to itself and freeze. TypeLang now never targets itself: it keeps your previous app, hands focus back to it on Escape, and if there's no app to paste into it leaves the translation on the clipboard and tells you. Translating from TypeLang's own Settings copies the result for you to paste with ⌘V. Every AppleScript call now has a time limit, and an app you've closed since opening the popup is no longer relaunched to paste into.
+- The popup's glow no longer looks cut off at the window edge.
 
 ### Changed
 
