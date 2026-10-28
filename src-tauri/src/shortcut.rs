@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    dictation_hotkey,
     focus::{self, FocusedApp},
     state::{AppState, CapturedTarget},
     window,
@@ -58,6 +59,8 @@ fn capture_target(app: &AppHandle) -> bool {
 /// both from the global shortcut handler and the tray's "Traducir ahora"
 /// menu item.
 pub fn trigger_translate(app: &AppHandle) {
+    // A dictation in progress (and its pill) gives way to the popup.
+    dictation_hotkey::external_cancel(app);
     if capture_target(app) {
         if let Err(e) = window::show_popup(app) {
             eprintln!("[shortcut] failed to show popup: {e}");
@@ -70,6 +73,7 @@ pub fn trigger_translate(app: &AppHandle) {
 /// `settings_store::AppSettings::snippet_shortcut`), independent of the
 /// translate one.
 pub fn trigger_snippets(app: &AppHandle) {
+    dictation_hotkey::external_cancel(app);
     if capture_target(app) {
         if let Err(e) = window::show_snippets(app) {
             eprintln!("[shortcut] failed to show snippets: {e}");

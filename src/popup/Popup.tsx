@@ -20,7 +20,8 @@ const MAX_WINDOW_HEIGHT = 436;
 // own scrollHeight — needs room for the card's drop-shadow to fully fade
 // out instead of getting clipped by the window edge.
 const WINDOW_CHROME = 36;
-// Mirrors audio::MAX_RECORDING_SECS in Rust, which caps the capture buffer.
+// The popup's own limit. audio::MAX_RECORDING_SECS in Rust is a larger memory
+// bound (hotkey dictation records for longer), so it does not stop this for us.
 const MAX_RECORDING_SECONDS = 120;
 
 type RecState = "idle" | "recording" | "transcribing";

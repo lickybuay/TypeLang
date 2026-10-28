@@ -8,7 +8,21 @@ use serde::Deserialize;
 
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8178/v1";
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Transcription time grows with the audio: a fixed base plus one second per
+/// second of audio, capped.
+const BASE_TIMEOUT_SECS: u64 = 60;
+const MAX_TIMEOUT_SECS: u64 = 360;
+
+fn request_timeout(audio_secs: u64) -> Duration {
+    Duration::from_secs(BASE_TIMEOUT_SECS.saturating_add(audio_secs).min(MAX_TIMEOUT_SECS))
+}
+
+/// Length of a WAV in whole seconds; 0 when it cannot be read.
+fn wav_secs(wav: &[u8]) -> u64 {
+    hound::WavReader::new(std::io::Cursor::new(wav)).map_or(0, |reader| {
+        u64::from(reader.duration()) / u64::from(reader.spec().sample_rate.max(1))
+    })
+}
 
 #[derive(Deserialize)]
 struct TranscriptionResponse {
@@ -57,6 +71,7 @@ pub async fn transcribe(
 ) -> Result<String, String> {
     let base_url = normalize_base_url(base_url);
     let url = format!("{base_url}/audio/transcriptions");
+    let timeout = request_timeout(wav_secs(&wav));
 
     let file = Part::bytes(wav)
         .file_name("audio.wav")
@@ -73,7 +88,7 @@ pub async fn transcribe(
     }
 
     let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())?;
     let response = client

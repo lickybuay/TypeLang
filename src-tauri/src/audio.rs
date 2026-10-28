@@ -18,9 +18,11 @@ use tokio::sync::oneshot;
 
 use crate::state::AppState;
 
-/// Hard cap on a single recording. The popup also auto-stops at this length;
-/// this bound only keeps memory finite if it ever doesn't.
-pub const MAX_RECORDING_SECS: u32 = 120;
+/// Hard cap on a single recording; it only keeps memory finite. The popup
+/// stops itself well before this (its own 120 s limit in Popup.tsx) and hotkey
+/// dictation after `dictation_machine::HOTKEY_MAX_SECS`, which must not
+/// exceed it.
+pub const MAX_RECORDING_SECS: u32 = 300;
 /// Shorter recordings are accidental clicks: dropped without an error.
 const MIN_RECORDING_SECS: f32 = 0.3;
 /// A recording nobody stopped after this long past the cap is dropped (the

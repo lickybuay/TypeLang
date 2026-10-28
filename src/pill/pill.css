@@ -1,0 +1,180 @@
+/* The recording pill fills its borderless, transparent window exactly (see
+   PILL_WIDTH/PILL_HEIGHT in window.rs). Dark in both themes: it floats over
+   arbitrary apps, so it does not follow the system appearance. Class names
+   are prefixed rec-pill because theme.css already owns .pill. */
+
+.rec-pill {
+  width: 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  overflow: hidden;
+  background: #17171a;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #f5f5f5;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.rec-pill-hint,
+.rec-pill-error {
+  justify-content: center;
+  padding: 0 20px;
+}
+
+.rec-pill-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.rec-pill-button,
+.rec-pill-spacer {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.rec-pill-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #d4d4d8;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.rec-pill-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.rec-pill-button:focus-visible {
+  outline: 2px solid #ffd93d;
+  outline-offset: 2px;
+}
+
+.rec-pill-button-accept {
+  background: #f5f5f5;
+  color: #17171a;
+}
+
+.rec-pill-button-accept:hover {
+  background: #fff;
+  color: #000;
+}
+
+.rec-pill-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.rec-pill-dot-idle {
+  background: #77777c;
+}
+
+.rec-pill-dot-live {
+  background: #ff5252;
+  animation: rec-pill-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-pill-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 82, 82, 0);
+  }
+}
+
+.rec-pill-time {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.rec-pill-lock {
+  flex: none;
+  color: #9a9a9f;
+}
+
+.rec-pill-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d4d4d8;
+  white-space: nowrap;
+}
+
+/* Hint and error messages can be longer than the capsule: wrap to two lines
+   and clip the rest (the full text is in the title). */
+.rec-pill-text-wrap {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+.rec-pill-text-error {
+  color: #ff8a8a;
+}
+
+.rec-pill-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid #d4d4d8;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: rec-pill-spin 0.8s linear infinite;
+}
+
+@keyframes rec-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Screen-reader-only label for the state that has no visible text. */
+.rec-pill-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-pill-button {
+    transition: none;
+  }
+
+  .rec-pill-dot-live,
+  .rec-pill-spinner {
+    animation: none;
+  }
+}

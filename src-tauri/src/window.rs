@@ -1,12 +1,33 @@
 use crate::{audio, state::AppState};
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, WindowEvent,
 };
 
 pub const POPUP_LABEL: &str = "popup";
 pub const SETTINGS_LABEL: &str = "main";
 pub const SNIPPETS_LABEL: &str = "snippets";
+pub const PILL_LABEL: &str = "pill";
+
+// Panel class of the recording pill: it may never become the key or main
+// window, which is what keeps a click on it from activating TypeLang.
+#[cfg(target_os = "macos")]
+tauri_nspanel::tauri_panel! {
+    panel!(PillPanel {
+        config: {
+            can_become_key_window: false,
+            can_become_main_window: false,
+            is_floating_panel: true
+        }
+    })
+}
+
+// The recording pill; the capsule in Pill.tsx fills the window exactly.
+const PILL_WIDTH: f64 = 240.0;
+const PILL_HEIGHT: f64 = 52.0;
+/// Gap between the pill and the bottom of the monitor's work area (above the
+/// Dock).
+const PILL_BOTTOM_MARGIN: f64 = 16.0;
 
 /// Shows the floating translate popup, creating it on first use. Reused on
 /// subsequent shortcut presses instead of rebuilt, and reset via a JS event
@@ -55,13 +76,7 @@ pub fn show_popup(app: &AppHandle) -> tauri::Result<()> {
 /// multi-monitor setup. Falls back to the primary monitor if the cursor's
 /// monitor can't be resolved, and is a no-op if neither is available.
 fn center_on_active_monitor(app: &AppHandle, window: &WebviewWindow) {
-    let monitor = app
-        .cursor_position()
-        .ok()
-        .and_then(|cursor| app.monitor_from_point(cursor.x, cursor.y).ok().flatten())
-        .or_else(|| app.primary_monitor().ok().flatten());
-
-    let (Some(monitor), Ok(size)) = (monitor, window.outer_size()) else {
+    let (Some(monitor), Ok(size)) = (active_monitor(app), window.outer_size()) else {
         return;
     };
 
@@ -69,6 +84,14 @@ fn center_on_active_monitor(app: &AppHandle, window: &WebviewWindow) {
     let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
     let y = area.position.y + (area.size.height as i32 - size.height as i32) / 2;
     let _ = window.set_position(PhysicalPosition::new(x, y));
+}
+
+/// The monitor under the cursor, else the primary one.
+fn active_monitor(app: &AppHandle) -> Option<Monitor> {
+    app.cursor_position()
+        .ok()
+        .and_then(|cursor| app.monitor_from_point(cursor.x, cursor.y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten())
 }
 
 pub fn hide_popup(app: &AppHandle) {
@@ -123,6 +146,129 @@ pub fn hide_snippets(app: &AppHandle) {
     }
 }
 
+/// Options shared by the macOS panel and the plain window: borderless,
+/// transparent, always on top and never focused.
+fn pill_window_options<'a>(
+    builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    builder
+        .title("TypeLang")
+        .inner_size(PILL_WIDTH, PILL_HEIGHT)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .focusable(false)
+        .visible_on_all_workspaces(true)
+        .accept_first_mouse(true)
+        .visible(false)
+}
+
+/// Creates the recording pill hidden if it does not exist yet. It must never
+/// take focus (the target app keeps it) and its buttons must work without
+/// activating TypeLang, so on macOS it is a non-activating NSPanel that cannot
+/// become key or main, floats at status level on every Space (full-screen
+/// ones included), and is shown and hidden through the panel API only.
+pub fn ensure_pill(app: &AppHandle) -> tauri::Result<()> {
+    if app.get_webview_window(PILL_LABEL).is_some() {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::{CollectionBehavior, PanelBuilder, PanelLevel, StyleMask};
+
+        PanelBuilder::<_, PillPanel>::new(app, PILL_LABEL)
+            .url(WebviewUrl::App("index.html#/pill".into()))
+            .level(PanelLevel::Status)
+            .collection_behavior(
+                CollectionBehavior::new()
+                    .can_join_all_spaces()
+                    .full_screen_auxiliary()
+                    .stationary()
+                    .ignores_cycle(),
+            )
+            .add_style_mask(StyleMask::empty().nonactivating_panel())
+            .hides_on_deactivate(false)
+            .has_shadow(false)
+            .transparent(true)
+            .with_window(pill_window_options)
+            .build()?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    pill_window_options(WebviewWindowBuilder::new(
+        app,
+        PILL_LABEL,
+        WebviewUrl::App("index.html#/pill".into()),
+    ))
+    .build()?;
+
+    Ok(())
+}
+
+/// Moves the pill to the bottom center of the monitor under the cursor and
+/// shows it without focusing it. Main thread only.
+pub fn show_pill(app: &AppHandle) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window(PILL_LABEL) else {
+        return Ok(());
+    };
+    place_pill(app, &window);
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        // orderFrontRegardless: on screen, never key, never activating.
+        if let Ok(panel) = app.get_webview_panel(PILL_LABEL) {
+            panel.show();
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    window.show()
+}
+
+fn place_pill(app: &AppHandle, window: &WebviewWindow) {
+    let (Some(monitor), Ok(size)) = (active_monitor(app), window.outer_size()) else {
+        return;
+    };
+
+    let area = monitor.work_area();
+    let margin = (PILL_BOTTOM_MARGIN * monitor.scale_factor()).round() as i32;
+    let x = area.position.x + (area.size.width as i32 - size.width as i32) / 2;
+    let y = area.position.y + area.size.height as i32 - size.height as i32 - margin;
+    let _ = window.set_position(PhysicalPosition::new(x, y));
+}
+
+/// Hides the pill (orderOut on macOS). Main thread only.
+pub fn hide_pill(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        if let Ok(panel) = app.get_webview_panel(PILL_LABEL) {
+            panel.hide();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app.get_webview_window(PILL_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+pub fn pill_visible(app: &AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        app.get_webview_panel(PILL_LABEL)
+            .is_ok_and(|panel| panel.is_visible())
+    }
+    #[cfg(not(target_os = "macos"))]
+    app.get_webview_window(PILL_LABEL)
+        .is_some_and(|w| is_visible(&w))
+}
+
 pub fn show_settings(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
         let _ = window.show();
@@ -148,9 +294,10 @@ pub fn settings_focused(app: &AppHandle) -> bool {
 /// accessory app) can stay the active app and swallow the next shortcut.
 /// Hiding the app hands activation back to the previous one. Skipped while
 /// Settings is open, and never used on blur-hide (another app already took
-/// focus there).
+/// focus there). Also skipped while the recording pill is up: hiding the app
+/// would hide the pill with it.
 pub fn release_activation(app: &AppHandle) {
-    if settings_visible(app) {
+    if settings_visible(app) || pill_visible(app) {
         return;
     }
     #[cfg(target_os = "macos")]

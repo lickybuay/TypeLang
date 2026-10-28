@@ -6,6 +6,10 @@
 
 - **Voice dictation in the popup.** Click 🎤, speak, click again: the transcript lands in the popup so you can review or edit it, then Enter translates and pastes it. Filler words and mid-sentence self-corrections ("el martes, no perdón, el miércoles") are cleaned up in the translation.
 - **Hold-to-talk shortcut** (default `Alt+Shift+D`). Hold it anywhere, speak, release — the result is pasted at your cursor without opening the popup. Choose in Settings → Dictation whether it pastes the translation or your original words. The menu-bar icon shows `●` while recording, `…` while processing and `⚠` on errors (hover for the message).
+- **Hands-free dictation.** Tap the dictation shortcut twice quickly to keep recording without holding the keys, then press it once more to transcribe and paste. Recordings stop on their own after 5 minutes.
+- **Recording pill.** While you dictate with the shortcut, a small floating pill at the bottom of the screen (on the display under your cursor) shows the timer, with ✓ to finish and paste and ✕ to discard; a 🔒 marks hands-free mode, and it shows "Transcribing…" while it works. It never takes focus from the app you are typing in: on macOS it's a non-activating panel, so clicking it doesn't switch apps.
+
+  ![The recording pill in hands-free mode: ✕ to discard, timer, ✓ to finish and paste](pill-recording.png)
 - **Custom vocabulary** (Settings → Dictation): names and terms spelled exactly as you list them, in both the transcript and the translation.
 - **Snippets.** Press ⌘Enter instead of Enter to save a translation; the snippets shortcut (default `Alt+Shift+S`) opens a searchable picker to paste it again without re-translating. Snippets can also be added and edited in Settings.
 - **Start local services with TypeLang** (Settings → Local services). Optionally run a command when TypeLang opens — e.g. a script that starts your local speech-to-text and LLM servers — and stop it when TypeLang quits. If those servers are already running, TypeLang leaves them alone.
@@ -22,9 +26,15 @@
 
 ### Changed
 
+- A quick tap of the dictation shortcut (under 0.5 s) no longer records on its own — hold it, or tap twice to keep recording.
 - Translations use everyday contractions ("I'm", "don't") in the professional tone too — it reads more natural.
 - The same shortcut can't be assigned to two actions.
 - Security updates for TLS dependencies (rustls, quinn-proto, rustls-webpki, webpki-roots).
+- Speech-to-text requests now allow more time for longer recordings (60 s plus 1 s per second of audio, up to 6 minutes).
+
+### Dependencies
+
+- **New (macOS only): [`tauri-nspanel`](https://crates.io/crates/tauri-nspanel) 2.1.** Turns the recording pill into a non-activating `NSPanel`, so clicking ✓/✕ doesn't bring TypeLang to the front and the text is pasted where you were typing. It needs Tauri ≥ 2.8.5 with `macOSPrivateApi` enabled (already on in `tauri.conf.json`) and pulls in `pastey` and `objc2-core-video`; the rest of its stack (`objc2`, `objc2-app-kit`) was already in the tree. Nothing to install for users — it's compiled into the app.
 
 ### Upgrading from 0.1.0
 

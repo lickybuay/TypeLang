@@ -1,15 +1,23 @@
-//! Hold-to-talk dictation: hold the dictation shortcut to record, release to
-//! transcribe (and translate, per setting) and paste at the cursor of the app
-//! that was frontmost. No window is shown, so focus never leaves that app.
+//! Dictation shortcut: hold it to record and release to transcribe (and
+//! translate, per setting) and paste at the cursor of the app that was
+//! frontmost, or tap it twice to keep recording hands-free until the next
+//! press. A small non-focusable pill (see `window::show_pill`) shows the
+//! recording and lets the user finish or discard it, so focus never leaves the
+//! target app.
+//!
+//! The decisions live in `dictation_machine` (pure, testable); this module
+//! feeds it events under one mutex and executes the actions it returns.
 
-use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Manager};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 
 use crate::{
-    audio, focus,
+    audio,
+    dictation_machine::{self as machine, Action, Event, Machine, PillView, TimerKind, TrayView},
+    focus,
     focus::FocusedApp,
     keychain, llm, paste, settings_store,
     state::{AppState, HotkeyStart},
@@ -20,13 +28,52 @@ const RECORDING_STATUS: &str = "●";
 const WORKING_STATUS: &str = "…";
 const ERROR_STATUS: &str = "⚠";
 const NO_TARGET_STATUS: &str = "No había una app donde pegar";
-const ERROR_SHOWN: Duration = Duration::from_secs(4);
-/// A job busy for longer than the recorder's own cap plus its grace period
-/// lost its release (e.g. the shortcut was swallowed): treat it as stale.
-const STALE_AFTER: Duration = Duration::from_secs(150);
+const PILL_EVENT: &str = "pill-state";
+
+/// Everything the dictation shortcut mutates, behind one mutex in `AppState`.
+#[derive(Default)]
+pub struct DictationRuntime {
+    machine: Machine,
+    /// The press-time task (focus capture + recorder start) of the current
+    /// session; accepting awaits it so stop can never overtake start.
+    start: Option<HotkeyStart>,
+}
+
+/// What the pill window receives (event `pill-state` and command
+/// `dictation_pill_state`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PillPayload {
+    state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+impl From<&PillView> for PillPayload {
+    fn from(view: &PillView) -> Self {
+        let (state, started_at_ms, message) = match view {
+            PillView::Starting => ("starting", None, None),
+            PillView::Recording { started_at_ms } => ("recording", Some(*started_at_ms), None),
+            PillView::Locked { started_at_ms } => ("locked", Some(*started_at_ms), None),
+            PillView::Processing => ("processing", None, None),
+            PillView::Hint => ("hint", None, None),
+            PillView::Error(message) => ("error", None, Some(message.clone())),
+        };
+        PillPayload {
+            state,
+            started_at_ms,
+            message,
+        }
+    }
+}
 
 fn is_current(app: &AppHandle, id: u64) -> bool {
-    app.state::<AppState>().hotkey_gen.load(Ordering::SeqCst) == id
+    app.state::<AppState>()
+        .dictation
+        .lock()
+        .is_ok_and(|rt| rt.machine.gen == id)
 }
 
 fn popup_visible(app: &AppHandle) -> bool {
@@ -35,129 +82,268 @@ fn popup_visible(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// Shortcut pressed: start recording. OS key-repeat presses and presses during
-/// a running job are ignored through the busy flag.
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Shortcut pressed. Ignored while the translate popup is open.
 pub fn on_pressed(app: &AppHandle) {
-    let state = app.state::<AppState>();
     if popup_visible(app) {
         return;
     }
-    if state.hotkey_busy.load(Ordering::SeqCst) {
-        let stale = state
-            .hotkey_started
-            .lock()
-            .ok()
-            .and_then(|s| *s)
-            .is_none_or(|t| t.elapsed() > STALE_AFTER);
-        if !stale {
-            return;
-        }
-        eprintln!("[dictation] stale job reset");
-        // The old release never came: drop its recording, never transcribe it.
-        if let Some(old) = state.hotkey_start.lock().ok().and_then(|mut s| s.take()) {
-            old.abort();
-        }
-        audio::cancel(&state);
-    }
-
-    let id = state.hotkey_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    state.hotkey_busy.store(true, Ordering::SeqCst);
-    if let Ok(mut started) = state.hotkey_started.lock() {
-        *started = Some(Instant::now());
-    }
-    tray::set_status(app, Some(RECORDING_STATUS));
-
-    let app_for_start = app.clone();
-    let handle = tauri::async_runtime::spawn(async move { start(&app_for_start, id).await });
-    if let Ok(mut slot) = state.hotkey_start.lock() {
-        *slot = Some(handle);
-    };
+    dispatch(app, Event::Pressed);
 }
 
-/// Captures the frontmost app (off the main thread: it shells out) and opens
-/// the microphone.
-async fn start(app: &AppHandle, id: u64) -> Result<Option<FocusedApp>, String> {
+/// Shortcut released.
+pub fn on_released(app: &AppHandle) {
+    dispatch(app, Event::Released);
+}
+
+/// The pill's check mark: stop, transcribe and paste.
+pub fn pill_accept(app: &AppHandle) {
+    dispatch(app, Event::PillAccept);
+}
+
+/// The pill's cross: discard the recording, or abandon the running job.
+pub fn pill_cancel(app: &AppHandle) {
+    dispatch(app, Event::PillCancel);
+}
+
+/// The popup or the snippets picker is about to open: drop any dictation and
+/// hide the pill first. A no-op while idle.
+pub fn external_cancel(app: &AppHandle) {
+    dispatch(app, Event::ExternalCancel);
+}
+
+/// What the pill should show right now, if anything.
+pub fn pill_state(app: &AppHandle) -> Option<PillPayload> {
+    let state = app.state::<AppState>();
+    let rt = state.dictation.lock().ok()?;
+    rt.machine.pill.as_ref().map(PillPayload::from)
+}
+
+/// Feeds `event` to the machine and runs the resulting actions. The lock is
+/// released before any action runs: they touch windows and spawn tasks, which
+/// must never wait on this mutex.
+fn dispatch(app: &AppHandle, event: Event) {
+    let actions = {
+        let state = app.state::<AppState>();
+        let Ok(mut rt) = state.dictation.lock() else {
+            return;
+        };
+        let (next, actions) = machine::step(&rt.machine, event, Instant::now());
+        rt.machine = next;
+        actions
+    };
+    for action in actions {
+        execute(app, action);
+    }
+}
+
+fn execute(app: &AppHandle, action: Action) {
+    match action {
+        Action::Start { gen } => start_session(app, gen),
+        Action::Accept { gen, recapture } => spawn_job(app, gen, recapture),
+        Action::ReleaseRecording => release_recording(app),
+        Action::SyncPill => sync_pill(app),
+        Action::Tray(view) => set_tray(app, &view),
+        Action::Arm { kind, gen, after } => arm_timer(app, kind, gen, after),
+    }
+}
+
+fn set_tray(app: &AppHandle, view: &TrayView) {
+    match view {
+        TrayView::Clear => {
+            tray::set_status(app, None);
+            tray::set_tooltip(app, None);
+        }
+        TrayView::Recording => tray::set_status(app, Some(RECORDING_STATUS)),
+        TrayView::Working => tray::set_status(app, Some(WORKING_STATUS)),
+        TrayView::Error(message) => {
+            tray::set_status(app, Some(ERROR_STATUS));
+            tray::set_tooltip(app, Some(message));
+        }
+    }
+}
+
+fn arm_timer(app: &AppHandle, kind: TimerKind, gen: u64, after: Duration) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(after).await;
+        dispatch(&app, Event::Timer { kind, gen });
+    });
+}
+
+/// Makes the pill window match the machine's desired view. Runs on the main
+/// thread, one job per change, and reads the view when it runs: window
+/// operations from different threads can therefore never leave the pill
+/// showing an older decision.
+fn sync_pill(app: &AppHandle) {
+    let app_for_main = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || {
+        let view = app_for_main
+            .state::<AppState>()
+            .dictation
+            .lock()
+            .ok()
+            .and_then(|rt| rt.machine.pill.clone());
+        let Some(view) = view else {
+            window::hide_pill(&app_for_main);
+            return;
+        };
+        if let Err(e) = window::ensure_pill(&app_for_main) {
+            eprintln!("[dictation] could not create the pill: {e}");
+            return;
+        }
+        // State first, then show: a window that was hidden must not flash
+        // the previous state.
+        if let Err(e) = app_for_main.emit_to(window::PILL_LABEL, PILL_EVENT, PillPayload::from(&view)) {
+            eprintln!("[dictation] could not update the pill: {e}");
+        }
+        if let Err(e) = window::show_pill(&app_for_main) {
+            eprintln!("[dictation] could not show the pill: {e}");
+        }
+    }) {
+        eprintln!("[dictation] could not sync the pill: {e}");
+    }
+}
+
+/// Spawns the press-time task and keeps its handle for accept/cancel.
+fn start_session(app: &AppHandle, gen: u64) {
+    let app_for_start = app.clone();
+    let handle = tauri::async_runtime::spawn(async move { start(&app_for_start, gen).await });
+    let state = app.state::<AppState>();
+    let Ok(mut rt) = state.dictation.lock() else {
+        handle.abort();
+        return;
+    };
+    if rt.machine.gen != gen {
+        // Cancelled before the handle could be stored.
+        handle.abort();
+        return;
+    }
+    if let Some(old) = rt.start.replace(handle) {
+        old.abort();
+    }
+}
+
+/// Captures the frontmost app (off the main thread: it shells out), then opens
+/// the microphone. The pill appears once the capture is done: capturing after
+/// a window is shown could see that window instead of the target app.
+async fn start(app: &AppHandle, gen: u64) -> Result<Option<FocusedApp>, String> {
     let target = tauri::async_runtime::spawn_blocking(focus::capture)
         .await
         .ok()
         .and_then(Result::ok);
+    dispatch(app, Event::Captured { gen });
+
     let state = app.state::<AppState>();
-    if let Err(e) = audio::start(&state).await {
-        audio::cancel(&state);
-        if is_current(app, id) {
-            tray::set_status(app, None);
+    match audio::start(&state).await {
+        Ok(()) => {
+            dispatch(
+                app,
+                Event::AudioStarted {
+                    gen,
+                    at_ms: epoch_ms(),
+                },
+            );
+            Ok(target)
         }
-        return Err(e);
+        Err(e) => {
+            // A newer session owns the recorder: stopping it here would steal
+            // its audio.
+            if is_current(app, gen) {
+                audio::cancel(&state);
+            }
+            dispatch(
+                app,
+                Event::StartFailed {
+                    gen,
+                    message: e.clone(),
+                },
+            );
+            Err(e)
+        }
     }
-    Ok(target)
 }
 
-/// Shortcut released: stop recording and run the rest of the job.
-pub fn on_released(app: &AppHandle) {
+/// Drops the in-flight start task and the recording.
+fn release_recording(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let Some(start) = state.hotkey_start.lock().ok().and_then(|mut s| s.take()) else {
-        return;
-    };
+    let old = state.dictation.lock().ok().and_then(|mut rt| rt.start.take());
+    if let Some(old) = old {
+        old.abort();
+    }
+    audio::cancel(&state);
+}
+
+/// Runs the rest of the job for session `gen` and reports the outcome back to
+/// the machine.
+fn spawn_job(app: &AppHandle, gen: u64, recapture: bool) {
+    let start = app
+        .state::<AppState>()
+        .dictation
+        .lock()
+        .ok()
+        .and_then(|mut rt| rt.start.take());
     let app = app.clone();
-    let id = state.hotkey_gen.load(Ordering::SeqCst);
     tauri::async_runtime::spawn(async move {
-        let result = run(&app, id, start).await;
-        finish(&app, id, result);
+        let result = match start {
+            Some(start) => run(&app, gen, start, recapture).await,
+            None => Err("No hay una grabación en curso".to_string()),
+        };
+        if let Err(e) = &result {
+            eprintln!("[dictation] {e}");
+        }
+        // A superseded job's outcome is ignored by the machine.
+        dispatch(
+            &app,
+            Event::JobFinished {
+                gen,
+                error: result.err(),
+            },
+        );
     });
 }
 
-/// Clears the busy state in every exit path, then shows the error if any. A
-/// superseded job only logs: the newer job owns the busy flag and the tray.
-fn finish(app: &AppHandle, id: u64, result: Result<(), String>) {
-    if !is_current(app, id) {
-        if let Err(e) = result {
-            eprintln!("[dictation] superseded job failed: {e}");
-        }
-        return;
-    }
-    let state = app.state::<AppState>();
-    state.hotkey_busy.store(false, Ordering::SeqCst);
-    if let Ok(mut started) = state.hotkey_started.lock() {
-        *started = None;
-    }
-    match result {
-        Ok(()) => tray::set_status(app, None),
-        Err(e) => {
-            eprintln!("[dictation] {e}");
-            tray::set_status(app, Some(ERROR_STATUS));
-            tray::set_tooltip(app, Some(&e));
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(ERROR_SHOWN).await;
-                // A new job already owns the tray text.
-                if !app.state::<AppState>().hotkey_busy.load(Ordering::SeqCst) {
-                    tray::set_status(&app, None);
-                    tray::set_tooltip(&app, None);
-                }
-            });
-        }
-    }
-}
+/// With `recapture` (the session was locked) the paste target is whatever app
+/// is in front when the user accepts, not the one captured at the first press:
+/// a locked recording can last minutes, and the user may have moved on. A hold
+/// is over in seconds, so it keeps the captured target and restores it.
+async fn run(app: &AppHandle, id: u64, start: HotkeyStart, recapture: bool) -> Result<(), String> {
+    let mut target = start.await.map_err(|e| e.to_string())??;
 
-async fn run(app: &AppHandle, id: u64, start: HotkeyStart) -> Result<(), String> {
-    let target = start.await.map_err(|e| e.to_string())??;
-
-    // A newer job owns the recorder now; stopping it here would steal its audio.
+    // A newer session owns the recorder now; stopping it here would steal its
+    // audio.
     if !is_current(app, id) {
         return Ok(());
     }
     let state = app.state::<AppState>();
-    let Some(target) = target else {
+    if target.is_none() && !recapture {
         audio::cancel(&state);
         return Err("No se pudo detectar la app destino".to_string());
-    };
+    }
     let wav = audio::stop(&state).await?;
     if wav.is_empty() {
         return Ok(());
     }
-    if is_current(app, id) {
-        tray::set_status(app, Some(WORKING_STATUS));
+    if recapture {
+        let fresh = tauri::async_runtime::spawn_blocking(focus::capture)
+            .await
+            .ok()
+            .and_then(Result::ok);
+        // TypeLang in front says nothing about where the user was (the pill
+        // should not activate it, but if it ever does): keep the app captured
+        // at the start, with its restore path, instead of failing.
+        if !fresh.as_ref().is_some_and(FocusedApp::is_self) {
+            target = fresh;
+        }
     }
+    let Some(target) = target else {
+        return Err("No se pudo detectar la app destino".to_string());
+    };
 
     let settings = settings_store::load(app)?;
     let vocabulary = settings.vocabulary_terms();

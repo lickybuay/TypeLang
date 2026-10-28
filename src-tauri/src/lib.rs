@@ -2,6 +2,7 @@ mod accessibility;
 mod audio;
 mod commands;
 mod dictation_hotkey;
+mod dictation_machine;
 mod focus;
 mod keychain;
 mod llm;
@@ -24,7 +25,7 @@ use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Must be the first plugin registered: it's what lets a second
         // launch (e.g. opening the dev build while a release build, or
         // another dev instance, is already running) detect the existing
@@ -33,7 +34,14 @@ pub fn run() {
         // registers second silently wins, leaving the other one dead.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             window::show_settings(app);
-        }))
+        }));
+
+    // Registers the panel store that `window::ensure_pill` converts the
+    // recording pill into.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -101,6 +109,9 @@ pub fn run() {
             commands::dictation::start_recording,
             commands::dictation::stop_and_transcribe,
             commands::dictation::cancel_recording,
+            commands::dictation::dictation_pill_accept,
+            commands::dictation::dictation_pill_cancel,
+            commands::dictation::dictation_pill_state,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -128,6 +139,12 @@ pub fn run() {
             }
 
             tray::setup(handle)?;
+
+            // Built hidden so its webview is already listening when the
+            // first dictation shows it.
+            if let Err(e) = window::ensure_pill(handle) {
+                eprintln!("[app] could not create the recording pill: {e}");
+            }
 
             services::start_if_configured(handle);
 

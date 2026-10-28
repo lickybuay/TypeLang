@@ -79,7 +79,12 @@ const dict = {
     dictationOutputOriginal: "El texto original",
     dictationOutputSaved: "Salida de dictado guardada.",
     dictationHotkeyHint:
-      "Mantené presionado el atajo y hablá; al soltarlo se transcribe y se pega donde tengas el cursor, sin abrir el popup. El ícono de la barra de menú muestra el estado: ● grabando, … procesando, ⚠ error.",
+      "Mantené presionado el atajo y hablá; al soltarlo se transcribe y se pega donde tengas el cursor, sin abrir el popup. Tocalo dos veces rápido para seguir grabando sin mantenerlo y presionalo de nuevo para terminar. Una píldora flotante muestra el tiempo, con ✓ para terminar y ✕ para descartar. El ícono de la barra de menú muestra el estado: ● grabando, … procesando, ⚠ error.",
+    pillStarting: "Preparando el micrófono",
+    pillLocked: "Grabación manos libres",
+    pillAccept: "Terminar y pegar",
+    pillCancel: "Descartar dictado",
+    pillHint: "Mantené apretado, o tocá dos veces para seguir grabando",
   },
   en: {
     appTitle: "TypeLang",
@@ -159,7 +164,12 @@ const dict = {
     dictationOutputOriginal: "The original text",
     dictationOutputSaved: "Dictation output saved.",
     dictationHotkeyHint:
-      "Hold the shortcut and speak; on release it is transcribed and pasted at your cursor, without opening the popup. The menu bar icon shows the state: ● recording, … working, ⚠ error.",
+      "Hold the shortcut and speak; on release it is transcribed and pasted at your cursor, without opening the popup. Tap it twice quickly to keep recording without holding it, and press it again to finish. A floating pill shows the time, with ✓ to finish and ✕ to discard. The menu bar icon shows the state: ● recording, … working, ⚠ error.",
+    pillStarting: "Getting the microphone ready",
+    pillLocked: "Hands-free recording",
+    pillAccept: "Finish and paste",
+    pillCancel: "Discard dictation",
+    pillHint: "Hold, or tap twice to keep recording",
   },
 } as const;
 
