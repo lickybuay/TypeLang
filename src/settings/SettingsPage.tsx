@@ -747,7 +747,7 @@ function SettingsPage() {
           <input
             className="pill pill-mono"
             type="text"
-            placeholder="zsh ~/UTILS/local_llm.sh 4"
+            placeholder="zsh ~/bin/start-local-ai.sh"
             value={autostartCommand}
             onChange={(e) => setAutostartCommand(e.target.value)}
           />
