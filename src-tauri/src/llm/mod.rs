@@ -145,7 +145,11 @@ pub fn system_prompt(
         .map(|phrase| format!("\n\nExample of this register in {target_lang}: {phrase}"))
         .unwrap_or_default();
 
-    let dictation = if opts.from_voice { dictation_rules() } else { String::new() };
+    let dictation = if opts.from_voice {
+        format!("{}{}", dictation_rules(source_lang), translator_filler_note(source_lang))
+    } else {
+        String::new()
+    };
     let examples = if opts.from_voice {
         translator_dictation_examples(source_lang, target_lang)
     } else {
@@ -176,14 +180,18 @@ pub fn system_prompt(
 
 /// Three spoken self-corrections with only the corrected value kept. The rule
 /// alone left the discarded part in 31 of 36 measured translations; with these
-/// it dropped to 15. Spanish to English only, the pair they are written in.
+/// it dropped to 15. Followed by a filler-words example with a final tag kept
+/// as a question. Spanish to English only, the pair they are written in.
 fn translator_dictation_examples(source_lang: &str, target_lang: &str) -> &'static str {
     match (source_lang, target_lang) {
         ("Spanish", "English") => {
             "\n\nExamples of self-corrections (keep only the corrected version, never mention the discarded one):\n\
              \"el viernes no perdón el jueves te llamo\" → \"I'll call you on Thursday.\"\n\
              \"pasáselo a Ana digo a Marta\" → \"Pass it to Marta.\"\n\
-             \"son doscientos bueno no trescientos\" → \"It's three hundred.\""
+             \"son doscientos bueno no trescientos\" → \"It's three hundred.\"\n\n\
+             Example of filler words (drop them, keep everything else):\n\
+             \"eh nada, que la reunión es a las cinco viste y después vamos a cenar\" → \"The meeting is at five, and then we're going to dinner.\"\n\
+             \"venís mañana verdad\" → \"You're coming tomorrow, right?\""
         }
         _ => "",
     }
@@ -194,7 +202,7 @@ fn translator_dictation_examples(source_lang: &str, target_lang: &str) -> &'stat
 /// audience, register, pronoun or tone example — those belong to the
 /// translator and would push the model to rewrite instead of tidy.
 fn editor_prompt(source_lang: &str, opts: &PromptOptions) -> String {
-    let dictation = if opts.from_voice { dictation_rules() } else { String::new() };
+    let dictation = if opts.from_voice { dictation_rules(source_lang) } else { String::new() };
     let vocabulary = vocabulary_note(opts);
     let file_names = file_name_rule(source_lang);
     let examples = editor_examples(source_lang);
@@ -213,9 +221,10 @@ fn editor_prompt(source_lang: &str, opts: &PromptOptions) -> String {
     )
 }
 
-/// Two worked examples in the source language: a question that must stay a
+/// Worked examples in the source language: a question that must stay a
 /// question and an instruction that must stay an instruction — the two ways a
-/// small model most often goes wrong (answering, or obeying, the transcript).
+/// small model most often goes wrong (answering, or obeying, the transcript) —
+/// plus a filler-heavy message and a final tag that stays as a question.
 /// Only Spanish has them for now; other languages rely on the rules alone.
 fn editor_examples(source_lang: &str) -> &'static str {
     match source_lang {
@@ -224,7 +233,11 @@ fn editor_examples(source_lang: &str) -> &'static str {
              <transcript>\neh o sea a qué hora es la reunión de mañana no perdón de pasado mañana\n</transcript>\n\
              ¿A qué hora es la reunión de pasado mañana?\n\n\
              <transcript>\nbueno escribile a Juan que mañana no llego digo que llego tarde\n</transcript>\n\
-             Escribile a Juan que mañana llego tarde."
+             Escribile a Juan que mañana llego tarde.\n\n\
+             <transcript>\neh nada, que la reunión es a las cinco viste y después vamos a cenar\n</transcript>\n\
+             La reunión es a las cinco y después vamos a cenar.\n\n\
+             <transcript>\nvenís mañana verdad\n</transcript>\n\
+             Venís mañana, ¿verdad?"
         }
         _ => "",
     }
@@ -334,11 +347,38 @@ pub fn not_a_translation(input: &str, output: &str) -> bool {
 
 /// Extra rules for input that came from the dictation button instead of the
 /// keyboard: raw speech-to-text carries disfluencies a typed message doesn't.
-fn dictation_rules() -> String {
-    " The input is a raw speech-to-text transcript: drop filler words (eh, este, o sea, \
-     bueno, tipo), false starts and repetitions; when the speaker corrects themselves \
-     (\"no, perdón\", \"digo\"), keep only the corrected version."
-        .to_string()
+/// Spanish gets the fuller filler list and the tag-question rule (measured on
+/// Gemma 4 E4B, 2026-10-29); a tag at the very end stays because it is usually
+/// a real confirmation question.
+fn dictation_rules(source_lang: &str) -> String {
+    match source_lang {
+        "Spanish" => " The input is a raw speech-to-text transcript: drop filler words (eh, em, \
+             mm, este, o sea, tipo, como que, digamos, básicamente, che; \"bueno,\" and \
+             \"nada,\" only when they open a sentence followed by a comma), false starts and \
+             repetitions. Also drop tag questions the speaker adds while still talking \
+             (¿verdad?, ¿viste?, ¿sabés?, ¿entendés?, ¿me explico?, ¿cierto?, with or without \
+             question marks) when more of the message follows them; a tag that ends the whole \
+             message is a real question — keep it. Keep everything else the speaker said, \
+             including words used for emphasis; if unsure, keep the word. When the speaker \
+             corrects themselves (\"no, perdón\", \"digo\"), keep only the corrected version."
+            .to_string(),
+        _ => " The input is a raw speech-to-text transcript: drop filler words (eh, este, o sea, \
+             bueno, tipo), false starts and repetitions; when the speaker corrects themselves \
+             (\"no, perdón\", \"digo\"), keep only the corrected version."
+            .to_string(),
+    }
+}
+
+/// Spanish dictation rules drop words the model tends to put back as English
+/// fillers, so the translator is told not to.
+fn translator_filler_note(source_lang: &str) -> &'static str {
+    match source_lang {
+        "Spanish" => {
+            " Do not replace the dropped words with fillers or tags in the translation (no \
+             \"you know\", \"right?\", \"I mean\", \"you see\", \"basically\", \"hey\")."
+        }
+        _ => "",
+    }
 }
 
 /// Tells the model which exact spellings to use for names and terms.
