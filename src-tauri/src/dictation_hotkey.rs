@@ -28,6 +28,7 @@ const RECORDING_STATUS: &str = "●";
 const WORKING_STATUS: &str = "…";
 const ERROR_STATUS: &str = "⚠";
 const NO_TARGET_STATUS: &str = "No había una app donde pegar";
+const NOT_TRANSLATED_NOTICE: &str = "No se tradujo: la transcripción quedó en el portapapeles";
 const PILL_EVENT: &str = "pill-state";
 
 /// Everything the dictation shortcut mutates, behind one mutex in `AppState`.
@@ -314,7 +315,9 @@ fn spawn_job(app: &AppHandle, gen: u64, recapture: bool) {
 /// transcript and what the LLM answered (`None` when it was not asked).
 /// The second value is a notice for the user when the result is not what the
 /// mode promises: "improve" never fails the job, it falls back to the
-/// transcript and says so. A failed translation stays an error.
+/// transcript and says so. A failed translation stays an error, except a reply
+/// that was not a translation: that returns the transcript with a notice, and
+/// `copy_only` says it goes to the clipboard instead of being pasted.
 ///
 /// The notice is one of a few fixed texts, never the provider's error: that
 /// text is for the log, and it can carry details that do not belong on screen.
@@ -336,9 +339,25 @@ fn choose_output(
             unimproved(transcript, "la respuesta se cortó")
         }
         ("improve", Some(Err(_)) | None) => unimproved(transcript, "el modelo no respondió"),
+        ("translate", Some(Err(e))) if e == llm::NOT_A_TRANSLATION => {
+            Ok((transcript, Some(NOT_TRANSLATED_NOTICE.to_string())))
+        }
         (_, Some(reply)) => reply.map(|text| (text, None)),
         (_, None) => Err("El modelo no respondió".to_string()),
     }
+}
+
+/// Whether `choose_output` returns the transcript to copy rather than paste.
+/// Pasting it in a translate flow would put the wrong language in the target
+/// app.
+fn copy_only(mode: &str, reply: &Option<Result<String, String>>) -> bool {
+    mode == "translate" && matches!(reply, Some(Err(e)) if e == llm::NOT_A_TRANSLATION)
+}
+
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.set_text(text))
+        .map_err(|e| e.to_string())
 }
 
 /// With `recapture` (the session was locked) the paste target is whatever app
@@ -443,6 +462,7 @@ async fn run(
         }
         Some(reply)
     };
+    let skip_paste = copy_only(mode, &reply);
     let (text, notice) = choose_output(mode, transcript, reply)?;
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -457,6 +477,10 @@ async fn run(
             if !is_current(&app_for_main, id) {
                 return Ok(());
             }
+            // Nothing is pasted, so no target app is needed (or restored).
+            if skip_paste {
+                return copy_to_clipboard(&text);
+            }
             if target.is_self() {
                 // Never restore ourselves: TypeLang can only be the target
                 // when its Settings window is the one in front. And never
@@ -466,9 +490,7 @@ async fn run(
                 if !window::settings_focused(&app_for_main) {
                     return Err(NO_TARGET_STATUS.to_string());
                 }
-                return arboard::Clipboard::new()
-                    .and_then(|mut clipboard| clipboard.set_text(&text))
-                    .map_err(|e| e.to_string());
+                return copy_to_clipboard(&text);
             } else {
                 let still_front = focus::capture().map(|f| f.is_same(&target));
                 if still_front != Ok(true) {
@@ -567,5 +589,23 @@ mod tests {
         let (text, notice) = chosen("improve", None).unwrap();
         assert_eq!(text, TRANSCRIPT);
         assert_eq!(notice.as_deref(), Some("Pegado sin mejorar: el modelo no respondió"));
+    }
+
+    #[test]
+    fn translate_that_is_not_a_translation_returns_the_transcript_with_a_notice() {
+        let reply = Some(Err(llm::NOT_A_TRANSLATION.to_string()));
+        assert_eq!(
+            chosen("translate", reply),
+            Ok((TRANSCRIPT.to_string(), Some(NOT_TRANSLATED_NOTICE.to_string())))
+        );
+    }
+
+    #[test]
+    fn copy_only_applies_just_to_a_translate_that_is_not_a_translation() {
+        assert!(copy_only("translate", &Some(Err(llm::NOT_A_TRANSLATION.to_string()))));
+        assert!(!copy_only("translate", &Some(Ok("hello".to_string()))));
+        assert!(!copy_only("translate", &Some(Err("boom".to_string()))));
+        assert!(!copy_only("improve", &Some(Err(llm::NOT_A_TRANSLATION.to_string()))));
+        assert!(!copy_only("original", &None));
     }
 }
